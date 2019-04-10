@@ -26,6 +26,9 @@ use winapi::um::d2d1::{
     D2D1_POINT_2F,
 };
 
+mod com_ptr;
+use com_ptr::ComPtr;
+
 fn win32_string(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
 }
@@ -87,79 +90,54 @@ fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
 
 struct AppState {
     hwnd: HWND,
-    d2d_factory: *mut ID2D1Factory,
-    dwrite_factory: *mut IDWriteFactory,
-}
-
-impl Drop for AppState {
-    fn drop(&mut self) {
-        unsafe {
-            assert!(!self.d2d_factory.is_null());
-            (*self.d2d_factory).Release();
-
-            assert!(!self.dwrite_factory.is_null());
-            (*self.dwrite_factory).Release();
-        }
-    }
+    d2d_factory: ComPtr<ID2D1Factory>,
+    dwrite_factory: ComPtr<IDWriteFactory>,
 }
 
 impl AppState {
     fn new(hwnd: HWND) -> Self {
-        let mut app_state = AppState {
-            hwnd,
-            d2d_factory: null_mut(),
-            dwrite_factory: null_mut(),
-        };
-        let factory_options = D2D1_FACTORY_OPTIONS {
-            debugLevel: D2D1_DEBUG_LEVEL_INFORMATION,
-        };
-        unsafe {
+        let d2d_factory = unsafe {
+            let factory_options = D2D1_FACTORY_OPTIONS {
+                debugLevel: D2D1_DEBUG_LEVEL_INFORMATION,
+            };
+            let mut d2d_factory = null_mut();
             let hr = D2D1CreateFactory(
                 D2D1_FACTORY_TYPE_SINGLE_THREADED,
                 &ID2D1Factory::uuidof(),
                 &factory_options as *const D2D1_FACTORY_OPTIONS,
-                &mut app_state.d2d_factory as *mut _ as *mut *mut c_void,
+                &mut d2d_factory,
             );
             assert!(hr == S_OK, "0x{:x}", hr);
-
+            ComPtr::from_raw(d2d_factory as * mut _)
+        };
+        let dwrite_factory = unsafe {
+            let mut dwrite_factory = null_mut();
             let hr = DWriteCreateFactory(
                 DWRITE_FACTORY_TYPE_SHARED,
                 &IDWriteFactory::uuidof(),
-                &mut app_state.dwrite_factory as *mut _ as *mut *mut IUnknown,
+                &mut dwrite_factory,
             );
             assert!(hr == S_OK, "0x{:x}", hr);
+            ComPtr::from_raw(dwrite_factory as * mut _)
+        };
+        AppState {
+            hwnd,
+            d2d_factory,
+            dwrite_factory,
         }
-        app_state
     }
 }
 
 struct Resources {
-    render_target: *mut ID2D1HwndRenderTarget,
-    brush: *mut ID2D1SolidColorBrush,
-    text_format: * mut IDWriteTextFormat,
-}
-
-impl Drop for Resources {
-    fn drop(&mut self) {
-        println!("Resources::drop()");
-        assert!(!self.render_target.is_null());
-        assert!(!self.brush.is_null());
-        unsafe {
-            (*self.render_target).Release();
-            (*self.brush).Release();
-        }
-    }
+    render_target: ComPtr<ID2D1HwndRenderTarget>,
+    brush: ComPtr<ID2D1SolidColorBrush>,
+    text_format: ComPtr<IDWriteTextFormat>,
 }
 
 impl Resources {
     fn new(app_state: &AppState) -> Self {
         println!("Resources::new()");
-        let mut res = Resources {
-            render_target: null_mut(),
-            brush: null_mut(),
-            text_format: null_mut(),
-        };
-        unsafe {
+        let render_target = unsafe {
             let mut rc: RECT = mem::uninitialized();
             GetClientRect(app_state.hwnd, &mut rc);
             println!("client rect {:?}", rc);
@@ -183,18 +161,25 @@ impl Resources {
                 },
                 presentOptions: D2D1_PRESENT_OPTIONS_NONE,
             };
-            let hr = (*app_state.d2d_factory).CreateHwndRenderTarget(
+            let mut render_target = null_mut();
+            let hr = app_state.d2d_factory.CreateHwndRenderTarget(
                 &render_properties,
                 &hwnd_render_properties,
-                &mut res.render_target,
+                &mut render_target,
             );
             assert!(hr == S_OK, "0x{:x}", hr);
-
+            ComPtr::from_raw(render_target)
+        };
+        let brush = unsafe {
             let c = D2D1_COLOR_F { r: 1.0, b: 1.0, g: 1.0, a: 1.0 };
-            let hr = (*res.render_target).CreateSolidColorBrush(&c, null(), &mut res.brush);
+            let mut brush = null_mut();
+            let hr = render_target.CreateSolidColorBrush(&c, null(), &mut brush);
             assert!(hr == S_OK, "0x{:x}", hr);
-
-            let hr = (*app_state.dwrite_factory).CreateTextFormat(
+            ComPtr::from_raw(brush)
+        };
+        let text_format = unsafe {
+            let mut text_format = null_mut();
+            let hr = app_state.dwrite_factory.CreateTextFormat(
                 win32_string("Consolas").as_ptr(),
                 null_mut(),
                 DWRITE_FONT_WEIGHT_REGULAR,
@@ -202,30 +187,35 @@ impl Resources {
                 DWRITE_FONT_STRETCH_NORMAL,
                 14.0,
                 win32_string("en-us").as_ptr(),
-                &mut res.text_format,
+                &mut text_format,
             );
             assert!(hr == S_OK, "0x{:x}", hr);
+            ComPtr::from_raw(text_format)
+        };
+        Resources {
+            render_target,
+            brush,
+            text_format,
         }
-        res
     }
 }
 
 fn paint() {
     let resources = unsafe { RESOURCES.as_ref().unwrap() };
     let app_state = unsafe { APP_STATE.as_ref().unwrap() };
-    let rt = resources.render_target;
+    let rt = &resources.render_target;
     unsafe {
-        (*rt).BeginDraw();
+        rt.BeginDraw();
         let c = D2D1_COLOR_F { r: 0.0, b: 0.2, g: 0.0, a: 1.0 };
-        (*rt).Clear(&c);
-        let size = (*rt).GetSize();
-        (*rt).DrawLine(
+        rt.Clear(&c);
+        let size = rt.GetSize();
+        rt.DrawLine(
             D2D_POINT_2F { x: 0.0, y: 0.0 },
             D2D_POINT_2F {
                 x: size.width,
                 y: size.height,
             },
-            resources.brush as *mut ID2D1Brush,
+            resources.brush.as_up_raw(),
             2.0,
             null_mut(),
         );
@@ -239,18 +229,21 @@ fn paint() {
         let layout_width = 100.0;
         let layout_height = 100.0;
 
-        let mut metrics : DWRITE_TEXT_METRICS = std::mem::zeroed();
-        let mut text_layout = null_mut();
-        let hr = (*app_state.dwrite_factory).CreateTextLayout(
-            message.as_ptr(),
-            (message.len() - 1) as u32,
-            resources.text_format,
-            layout_width,
-            layout_height,
-            &mut text_layout,
-        );
-        assert!(hr == S_OK, "0x{:x}", hr);
+        let text_layout = {
+            let mut text_layout = null_mut();
+            let hr = app_state.dwrite_factory.CreateTextLayout(
+                message.as_ptr(),
+                (message.len() - 1) as u32,
+                resources.text_format.as_raw(),
+                layout_width,
+                layout_height,
+                &mut text_layout,
+            );
+            assert!(hr == S_OK, "0x{:x}", hr);
+            ComPtr::from_raw(text_layout)
+        };
 
+        let mut metrics : DWRITE_TEXT_METRICS = std::mem::zeroed();
         let hr = (*text_layout).GetMetrics(&mut metrics);
         assert!(hr == S_OK, "0x{:x}", hr);
 
@@ -260,17 +253,16 @@ fn paint() {
             right: origin.x + metrics.widthIncludingTrailingWhitespace,
             bottom: origin.y + metrics.height,
         };
-        (*rt).DrawRectangle(&r, resources.brush as *mut ID2D1Brush, 1.0, null_mut());
+        rt.DrawRectangle(&r, resources.brush.as_up_raw(), 1.0, null_mut());
 
-        (*rt).DrawTextLayout(
+        rt.DrawTextLayout(
             origin,
-            text_layout,
-            resources.brush as *mut ID2D1Brush,
+            text_layout.as_raw(),
+            resources.brush.as_up_raw(),
             D2D1_DRAW_TEXT_OPTIONS_NONE,
         );
-        (*text_layout).Release();
 
-        let hr = (*rt).EndDraw(null_mut(), null_mut());
+        let hr = rt.EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
         // TODO: if hr == D2DERR_RECREATE_TARGET, recreate resources
     }
