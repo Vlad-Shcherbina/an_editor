@@ -16,9 +16,15 @@ use winapi::shared::dxgiformat::*;
 use winapi::shared::windowsx::*;
 use winapi::um::libloaderapi::GetModuleHandleW;
 use winapi::um::winuser::*;
-use winapi::um::d2d1::*;
 use winapi::um::dcommon::*;
-use winapi::um::d2d1::D2D1_SIZE_U;
+use winapi::um::d2d1::*;
+use winapi::um::dwrite::*;
+use winapi::um::unknwnbase::*;
+use winapi::um::d2d1::{
+    D2D1_SIZE_U,
+    D2D1_RECT_F,
+    D2D1_POINT_2F,
+};
 
 fn win32_string(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
@@ -82,6 +88,7 @@ fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
 struct AppState {
     hwnd: HWND,
     d2d_factory: *mut ID2D1Factory,
+    dwrite_factory: *mut IDWriteFactory,
 }
 
 impl Drop for AppState {
@@ -89,6 +96,9 @@ impl Drop for AppState {
         unsafe {
             assert!(!self.d2d_factory.is_null());
             (*self.d2d_factory).Release();
+
+            assert!(!self.dwrite_factory.is_null());
+            (*self.dwrite_factory).Release();
         }
     }
 }
@@ -98,6 +108,7 @@ impl AppState {
         let mut app_state = AppState {
             hwnd,
             d2d_factory: null_mut(),
+            dwrite_factory: null_mut(),
         };
         let factory_options = D2D1_FACTORY_OPTIONS {
             debugLevel: D2D1_DEBUG_LEVEL_INFORMATION,
@@ -110,6 +121,13 @@ impl AppState {
                 &mut app_state.d2d_factory as *mut _ as *mut *mut c_void,
             );
             assert!(hr == S_OK, "0x{:x}", hr);
+
+            let hr = DWriteCreateFactory(
+                DWRITE_FACTORY_TYPE_SHARED,
+                &IDWriteFactory::uuidof(),
+                &mut app_state.dwrite_factory as *mut _ as *mut *mut IUnknown,
+            );
+            assert!(hr == S_OK, "0x{:x}", hr);
         }
         app_state
     }
@@ -118,6 +136,7 @@ impl AppState {
 struct Resources {
     render_target: *mut ID2D1HwndRenderTarget,
     brush: *mut ID2D1SolidColorBrush,
+    text_format: * mut IDWriteTextFormat,
 }
 
 impl Drop for Resources {
@@ -138,6 +157,7 @@ impl Resources {
         let mut res = Resources {
             render_target: null_mut(),
             brush: null_mut(),
+            text_format: null_mut(),
         };
         unsafe {
             let mut rc: RECT = mem::uninitialized();
@@ -173,6 +193,18 @@ impl Resources {
             let c = D2D1_COLOR_F { r: 1.0, b: 1.0, g: 1.0, a: 1.0 };
             let hr = (*res.render_target).CreateSolidColorBrush(&c, null(), &mut res.brush);
             assert!(hr == S_OK, "0x{:x}", hr);
+
+            let hr = (*app_state.dwrite_factory).CreateTextFormat(
+                win32_string("Consolas").as_ptr(),
+                null_mut(),
+                DWRITE_FONT_WEIGHT_REGULAR,
+                DWRITE_FONT_STYLE_NORMAL,
+                DWRITE_FONT_STRETCH_NORMAL,
+                14.0,
+                win32_string("en-us").as_ptr(),
+                &mut res.text_format,
+            );
+            assert!(hr == S_OK, "0x{:x}", hr);
         }
         res
     }
@@ -180,6 +212,7 @@ impl Resources {
 
 fn paint() {
     let resources = unsafe { RESOURCES.as_ref().unwrap() };
+    let app_state = unsafe { APP_STATE.as_ref().unwrap() };
     let rt = resources.render_target;
     unsafe {
         (*rt).BeginDraw();
@@ -193,9 +226,49 @@ fn paint() {
                 y: size.height,
             },
             resources.brush as *mut ID2D1Brush,
-            10.0,
+            2.0,
             null_mut(),
         );
+
+        let message = win32_string("Здравствуй, мир!\nZz");
+
+        let origin = D2D1_POINT_2F {
+            x: 100.0,
+            y: 0.0,
+        };
+        let layout_width = 100.0;
+        let layout_height = 100.0;
+
+        let mut metrics : DWRITE_TEXT_METRICS = std::mem::zeroed();
+        let mut text_layout = null_mut();
+        let hr = (*app_state.dwrite_factory).CreateTextLayout(
+            message.as_ptr(),
+            (message.len() - 1) as u32,
+            resources.text_format,
+            layout_width,
+            layout_height,
+            &mut text_layout,
+        );
+        assert!(hr == S_OK, "0x{:x}", hr);
+
+        let hr = (*text_layout).GetMetrics(&mut metrics);
+        assert!(hr == S_OK, "0x{:x}", hr);
+
+        let r = D2D1_RECT_F {
+            left: origin.x,
+            top: origin.y,
+            right: origin.x + metrics.widthIncludingTrailingWhitespace,
+            bottom: origin.y + metrics.height,
+        };
+        (*rt).DrawRectangle(&r, resources.brush as *mut ID2D1Brush, 1.0, null_mut());
+
+        (*rt).DrawTextLayout(
+            origin,
+            text_layout,
+            resources.brush as *mut ID2D1Brush,
+            D2D1_DRAW_TEXT_OPTIONS_NONE,
+        );
+        (*text_layout).Release();
 
         let hr = (*rt).EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
