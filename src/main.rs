@@ -24,8 +24,10 @@ use winapi::um::d2d1::{
 };
 
 mod com_ptr;
-use com_ptr::ComPtr;
+mod text_layout;
 mod view_state;
+
+use com_ptr::ComPtr;
 use view_state::{ViewFrame, ViewState};
 
 fn win32_string(value: &str) -> Vec<u16> {
