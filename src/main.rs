@@ -43,7 +43,7 @@ fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
             Err(Error::last_os_error())?
         }
 
-        let cursor = LoadCursorW(0 as HINSTANCE, IDC_ARROW);
+        let cursor = LoadCursorW(0 as HINSTANCE, IDC_IBEAM);
         if cursor.is_null() {
             Err(Error::last_os_error())?
         }
@@ -277,6 +277,16 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let size = resources.render_target.GetSize();
                 let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
                 view_state.resize(view_frame, size.width - PADDING_LEFT, size.height);
+            }
+            0
+        }
+        WM_LBUTTONDOWN => {
+            println!("WM_LBUTTONDOWN");
+            let x = GET_X_LPARAM(lParam);
+            let y = GET_Y_LPARAM(lParam);
+            let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
+            if view_state.click(view_frame, x as f32 - PADDING_LEFT, y as f32) {
+                InvalidateRect(hWnd, null(), 1);
             }
             0
         }

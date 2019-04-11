@@ -83,6 +83,17 @@ impl ViewState {
         }
     }
 
+    pub fn click(&mut self, _view_frame: &mut ViewFrame, x: f32, y: f32) -> bool {
+        let pos = self.text_layout.coords_to_pos(x, y);
+        assert!(pos <= self.text.len());
+        if self.cursor_pos != pos {
+            self.cursor_pos = pos;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn resize(&mut self, view_frame: &mut ViewFrame, width: f32, height: f32) {
         view_frame.width = width;
         view_frame.height = height;

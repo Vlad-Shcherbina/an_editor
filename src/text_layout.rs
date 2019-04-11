@@ -74,4 +74,16 @@ impl TextLayout {
         }
         (x, y)
     }
+
+    pub fn coords_to_pos(&self, x: f32, y: f32) -> usize {
+        let mut is_trailing_hit = 0;
+        let mut is_inside = 0;
+        let mut metrics = unsafe { std::mem::zeroed() };
+        unsafe {
+            let hr = self.raw.HitTestPoint(
+                x, y, &mut is_trailing_hit, &mut is_inside, &mut metrics);
+            assert!(hr == S_OK, "0x{:x}", hr);
+        }
+        metrics.textPosition as usize + is_trailing_hit as usize
+    }
 }
