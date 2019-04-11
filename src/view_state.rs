@@ -50,6 +50,52 @@ impl ViewState {
         }
     }
 
+    pub fn insert_char(&mut self, view_frame: &ViewFrame, c: char) -> bool {
+        self.text.insert(self.cursor_pos, c);
+        self.cursor_pos += 1;
+        self.text_layout = view_frame.create_text_layout(&self.text);
+        true
+    }
+
+    pub fn backspace(&mut self, view_frame: &ViewFrame) -> bool {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            self.text.remove(self.cursor_pos);
+            self.text_layout = view_frame.create_text_layout(&self.text);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn del(&mut self, view_frame: &ViewFrame) -> bool {
+        if self.cursor_pos < self.text.len() {
+            self.text.remove(self.cursor_pos);
+            self.text_layout = view_frame.create_text_layout(&self.text);
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn left(&mut self, _view_frame: &ViewFrame) -> bool {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn right(&mut self, _view_frame: &ViewFrame) -> bool {
+        if self.cursor_pos < self.text.len() {
+            self.cursor_pos += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn resize(&mut self, view_frame: &mut ViewFrame, width: f32, height: f32) {
         view_frame.width = width;
         view_frame.height = height;

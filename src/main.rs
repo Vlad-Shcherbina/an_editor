@@ -104,10 +104,10 @@ impl AppState {
                 D2D1_FACTORY_TYPE_SINGLE_THREADED,
                 &ID2D1Factory::uuidof(),
                 &factory_options as *const D2D1_FACTORY_OPTIONS,
-                &mut d2d_factory,
+                &mut d2d_factory as *mut _ as *mut *mut _,
             );
             assert!(hr == S_OK, "0x{:x}", hr);
-            ComPtr::from_raw(d2d_factory as * mut _)
+            ComPtr::from_raw(d2d_factory)
         };
         let dwrite_factory = unsafe {
             let mut dwrite_factory = null_mut();
@@ -179,7 +179,7 @@ impl Resources {
         let text_format = unsafe {
             let mut text_format = null_mut();
             let hr = app_state.dwrite_factory.CreateTextFormat(
-                win32_string("Consolas").as_ptr(),
+                win32_string("Arial").as_ptr(),
                 null_mut(),
                 DWRITE_FONT_WEIGHT_REGULAR,
                 DWRITE_FONT_STYLE_NORMAL,
@@ -265,13 +265,61 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 height: GET_Y_LPARAM(lParam) as u32,
             };
 
-            let resources = RESOURCES.as_ref().unwrap();
-            let hr = resources.render_target.Resize(&render_size);
-            assert!(hr == S_OK, "0x{:x}", hr);
+            if render_size.width == 0 && render_size.height == 0 {
+                println!("minimize");
+            } else {
+                let resources = RESOURCES.as_ref().unwrap();
+                let hr = resources.render_target.Resize(&render_size);
+                assert!(hr == S_OK, "0x{:x}", hr);
 
-            let size = resources.render_target.GetSize();
+                let size = resources.render_target.GetSize();
+                let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
+                view_state.resize(view_frame, size.width - PADDING_LEFT, size.height);
+            }
+            0
+        }
+        WM_CHAR => {
+            let c: char = std::char::from_u32(wParam as u32).unwrap();
+            println!("WM_CHAR {:?}", c);
+            if wParam >= 32 {
+                let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
+                if view_state.insert_char(view_frame, c) {
+                    InvalidateRect(hWnd, null(), 1);
+                }
+            }
+            0
+        }
+        WM_KEYDOWN => {
+            println!("WM_KEYDOWN {}", wParam);
             let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
-            view_state.resize(view_frame, size.width - PADDING_LEFT, size.height);
+            match wParam as i32 {
+                VK_BACK => {
+                    if view_state.backspace(view_frame) {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
+                VK_DELETE => {
+                    if view_state.del(view_frame) {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
+                VK_LEFT => {
+                    if view_state.left(view_frame) {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
+                VK_RIGHT => {
+                    if view_state.right(view_frame) {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
+                VK_RETURN => {
+                    if view_state.insert_char(view_frame, '\n') {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
+                _ => {}
+            }
             0
         }
         _ => DefWindowProcW(hWnd, msg, wParam, lParam)
