@@ -6,7 +6,7 @@ use std::ops::Deref;
 use winapi::Interface;
 use winapi::um::unknwnbase::IUnknown;
 
-pub struct ComPtr<T>(pub NonNull<T>) where T: Interface;
+pub struct ComPtr<T>(NonNull<T>) where T: Interface;
 
 impl<T> ComPtr<T> where T: Interface {
     pub unsafe fn from_raw(ptr: *mut T) -> ComPtr<T> {
@@ -18,6 +18,15 @@ impl<T> Drop for ComPtr<T> where T: Interface {
     fn drop(&mut self) {
         unsafe {
             (*(self.0.as_ptr() as *mut IUnknown)).Release();
+        }
+    }
+}
+
+impl<T> Clone for ComPtr<T> where T: Interface {
+    fn clone(&self) -> Self {
+        unsafe {
+            (*(self.0.as_ptr() as *mut IUnknown)).AddRef();
+            ComPtr::from_raw(self.as_raw())
         }
     }
 }
@@ -36,7 +45,13 @@ impl<T> ComPtr<T> where T: Interface {
         self.0.as_ptr()
     }
 
-    pub fn as_up_raw<U: Interface>(&self) -> *mut U where T: Deref<Target=U> {
-        self.as_raw() as *mut U
+    fn into_raw(self) -> *mut T {
+        let p = self.0.as_ptr();
+        std::mem::forget(self);
+        p
+    }
+
+    pub fn up<U: Interface>(self) -> ComPtr<U> where T: Deref<Target=U> {
+        unsafe { ComPtr::from_raw(self.into_raw() as *mut U) }
     }
 }

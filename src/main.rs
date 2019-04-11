@@ -8,7 +8,6 @@ use std::ptr::{null, null_mut};
 use std::io::Error;
 
 use winapi::Interface;
-use winapi::ctypes::c_void;
 use winapi::shared::minwindef::*;
 use winapi::shared::windef::*;
 use winapi::shared::winerror::*;
@@ -19,15 +18,15 @@ use winapi::um::winuser::*;
 use winapi::um::dcommon::*;
 use winapi::um::d2d1::*;
 use winapi::um::dwrite::*;
-use winapi::um::unknwnbase::*;
 use winapi::um::d2d1::{
     D2D1_SIZE_U,
-    D2D1_RECT_F,
     D2D1_POINT_2F,
 };
 
 mod com_ptr;
 use com_ptr::ComPtr;
+mod view_state;
+use view_state::{ViewFrame, ViewState};
 
 fn win32_string(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
@@ -130,7 +129,7 @@ impl AppState {
 
 struct Resources {
     render_target: ComPtr<ID2D1HwndRenderTarget>,
-    brush: ComPtr<ID2D1SolidColorBrush>,
+    brush: ComPtr<ID2D1Brush>,
     text_format: ComPtr<IDWriteTextFormat>,
 }
 
@@ -194,73 +193,28 @@ impl Resources {
         };
         Resources {
             render_target,
-            brush,
+            brush: brush.up(),
             text_format,
         }
     }
 }
 
+const PADDING_LEFT: f32 = 5.0;
+
 fn paint() {
     let resources = unsafe { RESOURCES.as_ref().unwrap() };
-    let app_state = unsafe { APP_STATE.as_ref().unwrap() };
+    let (_view_frame, view_state) = unsafe { VIEW_STATE.as_ref().unwrap() };
     let rt = &resources.render_target;
     unsafe {
         rt.BeginDraw();
         let c = D2D1_COLOR_F { r: 0.0, b: 0.2, g: 0.0, a: 1.0 };
         rt.Clear(&c);
-        let size = rt.GetSize();
-        rt.DrawLine(
-            D2D_POINT_2F { x: 0.0, y: 0.0 },
-            D2D_POINT_2F {
-                x: size.width,
-                y: size.height,
-            },
-            resources.brush.as_up_raw(),
-            2.0,
-            null_mut(),
-        );
-
-        let message = win32_string("Здравствуй, мир!\nZz");
 
         let origin = D2D1_POINT_2F {
-            x: 100.0,
+            x: PADDING_LEFT,
             y: 0.0,
         };
-        let layout_width = 100.0;
-        let layout_height = 100.0;
-
-        let text_layout = {
-            let mut text_layout = null_mut();
-            let hr = app_state.dwrite_factory.CreateTextLayout(
-                message.as_ptr(),
-                (message.len() - 1) as u32,
-                resources.text_format.as_raw(),
-                layout_width,
-                layout_height,
-                &mut text_layout,
-            );
-            assert!(hr == S_OK, "0x{:x}", hr);
-            ComPtr::from_raw(text_layout)
-        };
-
-        let mut metrics : DWRITE_TEXT_METRICS = std::mem::zeroed();
-        let hr = (*text_layout).GetMetrics(&mut metrics);
-        assert!(hr == S_OK, "0x{:x}", hr);
-
-        let r = D2D1_RECT_F {
-            left: origin.x,
-            top: origin.y,
-            right: origin.x + metrics.widthIncludingTrailingWhitespace,
-            bottom: origin.y + metrics.height,
-        };
-        rt.DrawRectangle(&r, resources.brush.as_up_raw(), 1.0, null_mut());
-
-        rt.DrawTextLayout(
-            origin,
-            text_layout.as_raw(),
-            resources.brush.as_up_raw(),
-            D2D1_DRAW_TEXT_OPTIONS_NONE,
-        );
+        view_state.render(origin, rt, &resources.brush);
 
         let hr = rt.EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
@@ -276,6 +230,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_DESTROY");
             drop(APP_STATE.take());
             drop(RESOURCES.take());
+            drop(VIEW_STATE.take());
             PostQuitMessage(0);
             0
         }
@@ -290,8 +245,17 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_CREATE");
             let app_state = AppState::new(hWnd);
             let resources = Resources::new(&app_state);
+            let size = resources.render_target.GetSize();
+            let view_frame = ViewFrame {
+                width: size.width - PADDING_LEFT,
+                height: size.height,
+                text_format: resources.text_format.clone(),
+                dwrite_factory: app_state.dwrite_factory.clone(),
+            };
+            let view_state = ViewState::new(&view_frame);
             APP_STATE = Some(app_state);
             RESOURCES = Some(resources);
+            VIEW_STATE = Some((view_frame, view_state));
             0
         }
         WM_SIZE => {
@@ -302,8 +266,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             };
 
             let resources = RESOURCES.as_ref().unwrap();
-            let hr = (*resources.render_target).Resize(&render_size);
+            let hr = resources.render_target.Resize(&render_size);
             assert!(hr == S_OK, "0x{:x}", hr);
+
+            let size = resources.render_target.GetSize();
+            let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
+            view_state.resize(view_frame, size.width - PADDING_LEFT, size.height);
             0
         }
         _ => DefWindowProcW(hWnd, msg, wParam, lParam)
@@ -312,6 +280,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
 static mut APP_STATE: Option<AppState> = None;
 static mut RESOURCES: Option<Resources> = None;
+static mut VIEW_STATE: Option<(ViewFrame, ViewState)> = None;
 
 fn main() -> Result<(), Error> {
     let _hwnd = create_window("an_editor", "тест")?;
