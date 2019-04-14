@@ -86,7 +86,7 @@ impl<T: Default> LineGapBuffer<T> {
         }
     }
 
-    fn find_line(&self, pos: usize) -> usize {
+    pub fn find_line(&self, pos: usize) -> usize {
         assert!(pos <= self.len());
         let mut left = 0;
         let mut right = self.num_lines();

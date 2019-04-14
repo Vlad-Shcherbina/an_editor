@@ -89,6 +89,30 @@ impl ViewState {
         }
     }
 
+    pub fn up(&mut self) -> bool {
+        let (x, y) = self.pos_to_coord(self.cursor_pos);
+
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        // TODO: what if line above has different height?
+        self.click(x, y - layout.line_height * 0.5);
+        true
+    }
+
+    pub fn down(&mut self) -> bool {
+        let (x, y) = self.pos_to_coord(self.cursor_pos);
+
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        // TODO: what if line below has different height?
+        self.click(x, y + layout.line_height * 1.5);
+        true
+    }
+
     fn ensure_layout(&mut self, line_no: usize) {
         let line = self.document.get_line(line_no);
         if line.data.is_none() {
@@ -112,6 +136,21 @@ impl ViewState {
                 assert!(pos <= line.end - line.start);
                 self.cursor_pos = line.start + pos;
                 return true;
+            }
+            y0 += layout.height;
+        }
+        unreachable!()
+    }
+
+    fn pos_to_coord(&mut self, pos: usize) -> (f32, f32) {
+        let mut y0 = 0.0;
+        for i in 0..self.document.num_lines() {
+            self.ensure_layout(i);
+            let line = self.document.get_line(i);
+            let layout = line.data.as_ref().unwrap();
+            if line.start <= pos && pos <= line.end {
+                let (x, y) = layout.cursor_coords(pos - line.start);
+                return (x, y + y0);
             }
             y0 += layout.height;
         }
