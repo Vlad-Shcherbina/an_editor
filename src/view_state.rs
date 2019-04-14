@@ -5,6 +5,7 @@ use winapi::um::d2d1::*;
 
 use super::com_ptr::ComPtr;
 use super::text_layout::TextLayout;
+use super::line_gap_buffer::LineGapBuffer;
 
 pub struct ViewFrame {
     pub width: f32,
@@ -20,73 +21,40 @@ impl ViewFrame {
     }
 }
 
-struct Line {
-    text: Vec<char>,
-    layout: TextLayout,
-}
-
 pub struct ViewState {
-    lines: Vec<Line>,  // never empty
-    cursor_row: usize,
-    cursor_col: usize,
+    document: LineGapBuffer<Option<TextLayout>>,
+    cursor_pos: usize,
 }
 
 impl ViewState {
-    pub fn new(view_frame: &ViewFrame) -> ViewState {
+    pub fn new(_view_frame: &ViewFrame) -> ViewState {
         let mut text = "hello, world".to_owned();
         for _ in 0..5 {
             text.push_str("\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.");
         }
-        let lines = text.split('\n').map(|line| {
-            let text: Vec<char> = line.chars().collect();
-            let layout = view_frame.create_text_layout(&text);
-            Line { text, layout }
-        }).collect();
+        let text: Vec<char> = text.chars().collect();
+        let mut document = LineGapBuffer::new();
+        document.replace_slice(0, 0, &text);
+
+        // move gap to the beginning to avoid delay on first edit
+        document.replace_slice(0, 0, &[]);
+
         ViewState {
-            lines,
-            cursor_row: 0,
-            cursor_col: 0,
+            document,
+            cursor_pos: 0,
         }
     }
 
-    pub fn insert_char(&mut self, view_frame: &ViewFrame, c: char) -> bool {
-        if c == '\n' {
-            let next_text: Vec<char> =
-                self.lines[self.cursor_row].text[self.cursor_col..].to_vec();
-            let next_layout = view_frame.create_text_layout(&next_text);
-
-            let line = &mut self.lines[self.cursor_row];
-            line.text.truncate(self.cursor_col);
-            line.layout = view_frame.create_text_layout(&line.text);
-            self.cursor_row += 1;
-            self.lines.insert(self.cursor_row, Line {
-                text: next_text,
-                layout: next_layout,
-            });
-            self.cursor_col = 0;
-        } else {
-            let line = &mut self.lines[self.cursor_row];
-            line.text.insert(self.cursor_col, c);
-            self.cursor_col += 1;
-            line.layout = view_frame.create_text_layout(&line.text);
-        }
+    pub fn insert_char(&mut self, _view_frame: &ViewFrame, c: char) -> bool {
+        self.document.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
+        self.cursor_pos += 1;
         true
     }
 
-    pub fn backspace(&mut self, view_frame: &ViewFrame) -> bool {
-        if self.cursor_col > 0 {
-            let line = &mut self.lines[self.cursor_row];
-            self.cursor_col -= 1;
-            line.text.remove(self.cursor_col);
-            line.layout = view_frame.create_text_layout(&line.text);
-            true
-        } else if self.cursor_row > 0 {
-            let tail = self.lines.remove(self.cursor_row).text;
-            self.cursor_row -= 1;
-            let line = &mut self.lines[self.cursor_row];
-            self.cursor_col = line.text.len();
-            line.text.extend_from_slice(&tail);
-            line.layout = view_frame.create_text_layout(&line.text);
+    pub fn backspace(&mut self, _view_frame: &ViewFrame) -> bool {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -=1;
+            self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             true
         } else {
             false
@@ -104,12 +72,8 @@ impl ViewState {
     }
 
     pub fn left(&mut self, _view_frame: &ViewFrame) -> bool {
-        if self.cursor_col > 0 {
-            self.cursor_col -= 1;
-            true
-        } else if self.cursor_row > 0 {
-            self.cursor_row -= 1;
-            self.cursor_col = self.lines[self.cursor_row].text.len();
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
             true
         } else {
             false
@@ -117,30 +81,39 @@ impl ViewState {
     }
 
     pub fn right(&mut self, _view_frame: &ViewFrame) -> bool {
-        if self.cursor_col < self.lines[self.cursor_row].text.len() {
-            self.cursor_col += 1;
-            true
-        } else if self.cursor_row + 1 < self.lines.len() {
-            self.cursor_row += 1;
-            self.cursor_col = 0;
+        if self.cursor_pos < self.document.len() {
+            self.cursor_pos += 1;
             true
         } else {
             false
         }
     }
 
-    pub fn click(&mut self, _view_frame: &mut ViewFrame, x: f32, y: f32) -> bool {
+    fn ensure_layout(&mut self, view_frame: &mut ViewFrame, line_no: usize) {
+        let line = self.document.get_line(line_no);
+        if line.data.is_none() {
+            let line_text = self.document.slice_string(line.start, line.end);
+            let line_text: Vec<char> = line_text.chars().collect();
+            let layout = view_frame.create_text_layout(&line_text);
+            let line = self.document.get_line_mut(line_no);
+            *line.data = Some(layout);
+        }
+    }
+
+    pub fn click(&mut self, view_frame: &mut ViewFrame, x: f32, y: f32) -> bool {
         let mut y0 = 0.0;
-        for (i, line) in self.lines.iter().enumerate() {
+        for i in 0..self.document.num_lines() {
+            self.ensure_layout(view_frame, i);
+            let line = self.document.get_line(i);
+            let layout = line.data.as_ref().unwrap();
             if (i == 0 || y >= y0) &&
-               (i + 1 == self.lines.len() || y < y0 + line.layout.height) {
-                let pos = line.layout.coords_to_pos(x, y - y0);
-                assert!(pos <= line.text.len());
-                self.cursor_row = i;
-                self.cursor_col = pos;
+               (i + 1 == self.document.num_lines() || y < y0 + layout.height) {
+                let pos = layout.coords_to_pos(x, y - y0);
+                assert!(pos <= line.end - line.start);
+                self.cursor_pos = line.start + pos;
                 return true;
             }
-            y0 += line.layout.height;
+            y0 += layout.height;
         }
         unreachable!()
     }
@@ -148,38 +121,45 @@ impl ViewState {
     pub fn resize(&mut self, view_frame: &mut ViewFrame, width: f32, height: f32) {
         view_frame.width = width;
         view_frame.height = height;
-        for line in self.lines.iter_mut() {
-            line.layout = view_frame.create_text_layout(&line.text);
+        for i in 0..self.document.num_lines() {
+            *self.document.get_line_mut(i).data = None;
         }
     }
 
     pub fn render(
-        &self,
+        &mut self,
+        view_frame: &mut ViewFrame,
         origin: D2D1_POINT_2F,
         rt: &ComPtr<ID2D1HwndRenderTarget>,
         brush: &ComPtr<ID2D1Brush>,
     ) {
-        let mut y0 = origin.y;
-        for (i, line) in self.lines.iter().enumerate() {
+        let mut y0 = 0.0;
+        for i in 0..self.document.num_lines() {
+            if y0 > view_frame.height {
+                break;
+            }
+            self.ensure_layout(view_frame, i);
+            let line = self.document.get_line(i);
+            let layout = line.data.as_ref().unwrap();
             unsafe {
                 rt.DrawTextLayout(
-                    D2D1_POINT_2F { x: origin.x, y: y0},
-                    line.layout.raw.as_raw(),
+                    D2D1_POINT_2F { x: origin.x, y: origin.y + y0},
+                    layout.raw.as_raw(),
                     brush.as_raw(),
                     D2D1_DRAW_TEXT_OPTIONS_NONE,
                 );
             }
-            if i == self.cursor_row {
-                let (x, y) = line.layout.cursor_coords(self.cursor_col);
+            if line.start <= self.cursor_pos && self.cursor_pos <= line.end {
+                let (x, y) = layout.cursor_coords(self.cursor_pos - line.start);
                 let x = x.floor();
                 unsafe {
                     rt.DrawLine(
                         D2D1_POINT_2F {
                             x: origin.x + x,
-                            y: y0 + y },
+                            y: origin.y + y0 + y },
                         D2D1_POINT_2F {
                             x: origin.x + x,
-                            y: y0 + y + line.layout.line_height,
+                            y: origin.y + y0 + y + layout.line_height,
                         },
                         brush.as_raw(),
                         2.0,  // strokeWidth
@@ -187,7 +167,7 @@ impl ViewState {
                     );
                 }
             }
-            y0 += line.layout.height;
+            y0 += layout.height;
         }
     }
 }

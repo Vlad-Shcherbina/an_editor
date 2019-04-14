@@ -25,6 +25,7 @@ use winapi::um::d2d1::{
 
 mod com_ptr;
 mod text_layout;
+mod line_gap_buffer;
 mod view_state;
 
 use com_ptr::ComPtr;
@@ -205,7 +206,7 @@ const PADDING_LEFT: f32 = 5.0;
 
 fn paint() {
     let resources = unsafe { RESOURCES.as_ref().unwrap() };
-    let (_view_frame, view_state) = unsafe { VIEW_STATE.as_ref().unwrap() };
+    let (view_frame, view_state) = unsafe { VIEW_STATE.as_mut().unwrap() };
     let rt = &resources.render_target;
     unsafe {
         rt.BeginDraw();
@@ -216,7 +217,7 @@ fn paint() {
             x: PADDING_LEFT,
             y: 0.0,
         };
-        view_state.render(origin, rt, &resources.brush);
+        view_state.render(view_frame, origin, rt, &resources.brush);
 
         let hr = rt.EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
