@@ -5,7 +5,7 @@ use winapi::um::d2d1::*;
 
 use super::com_ptr::ComPtr;
 use super::text_layout::TextLayout;
-use super::line_gap_buffer::LineGapBuffer;
+use super::line_gap_buffer::{Line, LineGapBuffer};
 
 pub struct ViewState {
     width: f32,
@@ -165,6 +165,56 @@ impl ViewState {
         }
     }
 
+    fn draw_cursor(
+        &self,
+        x0: f32, y0: f32,
+        line: Line<&Option<TextLayout>>,
+        rt: &ComPtr<ID2D1HwndRenderTarget>,
+        brush: &ComPtr<ID2D1Brush>,
+    ) {
+        assert!(line.start <= self.cursor_pos && self.cursor_pos <= line.end);
+        let layout = line.data.as_ref().unwrap();
+        let (x, y) = layout.cursor_coords(self.cursor_pos - line.start);
+        let x = x.floor();
+        unsafe {
+            rt.DrawLine(
+                D2D1_POINT_2F {
+                    x: x0 + x,
+                    y: y0 + y },
+                D2D1_POINT_2F {
+                    x: x0 + x,
+                    y: y0 + y + layout.line_height,
+                },
+                brush.as_raw(),
+                2.0,  // strokeWidth
+                null_mut(),  // strokeStyle
+            );
+        }
+
+        let mut line_end = 0;
+        for lm in &layout.line_metrics[.. layout.line_metrics.len() - 1] {
+            line_end += lm.length as usize;
+            if line.start + line_end == self.cursor_pos {
+                let (x, y) = layout.cursor_coords_trailing(self.cursor_pos - line.start);
+                let x = x.floor();
+                unsafe {
+                    rt.DrawLine(
+                        D2D1_POINT_2F {
+                            x: x0 + x,
+                            y: y0 + y },
+                        D2D1_POINT_2F {
+                            x: x0 + x,
+                            y: y0 + y + layout.line_height,
+                        },
+                        brush.as_raw(),
+                        2.0,  // strokeWidth
+                        null_mut(),  // strokeStyle
+                    );
+                }
+            }
+        }
+    }
+
     pub fn render(
         &mut self,
         origin: D2D1_POINT_2F,
@@ -188,22 +238,7 @@ impl ViewState {
                 );
             }
             if line.start <= self.cursor_pos && self.cursor_pos <= line.end {
-                let (x, y) = layout.cursor_coords(self.cursor_pos - line.start);
-                let x = x.floor();
-                unsafe {
-                    rt.DrawLine(
-                        D2D1_POINT_2F {
-                            x: origin.x + x,
-                            y: origin.y + y0 + y },
-                        D2D1_POINT_2F {
-                            x: origin.x + x,
-                            y: origin.y + y0 + y + layout.line_height,
-                        },
-                        brush.as_raw(),
-                        2.0,  // strokeWidth
-                        null_mut(),  // strokeStyle
-                    );
-                }
+                self.draw_cursor(origin.x, origin.y + y0, line, rt, brush);
             }
             y0 += layout.height;
         }

@@ -1,6 +1,6 @@
 use std::ptr::null_mut;
 
-use winapi::shared::winerror::S_OK;
+use winapi::shared::winerror::{S_OK, HRESULT_FROM_WIN32, ERROR_INSUFFICIENT_BUFFER};
 use winapi::um::dwrite::*;
 
 use super::com_ptr::ComPtr;
@@ -10,6 +10,7 @@ pub struct TextLayout {
     pub width: f32,
     pub height: f32,
     pub line_height: f32,
+    pub line_metrics: Vec<DWRITE_LINE_METRICS>,
 }
 
 impl TextLayout {
@@ -51,11 +52,33 @@ impl TextLayout {
             assert!(hr == S_OK, "0x{:x}", hr);
         }
 
+        let mut line_metrics = vec![unsafe { std::mem::zeroed() }];
+        let mut actual_line_count = 0;
+        let mut hr = unsafe {
+            raw.GetLineMetrics(
+                line_metrics.as_mut_ptr(),
+                line_metrics.len() as u32,
+                &mut actual_line_count,
+            )
+        };
+        if hr == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER) {
+            line_metrics.resize(actual_line_count as usize, unsafe { std::mem::zeroed() });
+            hr = unsafe {
+                raw.GetLineMetrics(
+                    line_metrics.as_mut_ptr(),
+                    line_metrics.len() as u32,
+                    &mut actual_line_count,
+                )
+            };
+        }
+        assert!(hr == S_OK, "0x{:x}", hr);
+
         TextLayout {
             raw,
             width: text_metrics.widthIncludingTrailingWhitespace,
             height: text_metrics.height,
             line_height: ht_metrics.height,
+            line_metrics,
         }
     }
 
@@ -67,6 +90,23 @@ impl TextLayout {
             let hr = self.raw.HitTestTextPosition(
                 pos as u32,
                 0,  // isTrailingHit
+                &mut x, &mut y,
+                &mut metrics,
+            );
+            assert!(hr == S_OK, "0x{:x}", hr);
+        }
+        (x, y)
+    }
+
+    pub fn cursor_coords_trailing(&self, pos: usize) -> (f32, f32) {
+        assert!(pos > 0);
+        let mut x = 0.0;
+        let mut y = 0.0;
+        let mut metrics = unsafe { std::mem::zeroed() };
+        unsafe {
+            let hr = self.raw.HitTestTextPosition(
+                (pos - 1) as u32,
+                1,  // isTrailingHit
                 &mut x, &mut y,
                 &mut metrics,
             );
