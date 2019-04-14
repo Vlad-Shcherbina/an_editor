@@ -89,6 +89,33 @@ impl ViewState {
         }
     }
 
+    pub fn home(&mut self) -> bool {
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        let bounds = layout.line_boundaries();
+        self.cursor_pos = line.start + bounds.into_iter()
+            .filter(|&x| x < self.cursor_pos - line.start)
+            .last()
+            .unwrap_or(0);
+        true
+    }
+
+    pub fn end(&mut self) -> bool {
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        let bounds = layout.line_boundaries();
+        let &end = bounds.last().unwrap();
+        self.cursor_pos = line.start + bounds.into_iter()
+            .filter(|&x| x > self.cursor_pos - line.start)
+            .next()
+            .unwrap_or(end);
+        true
+    }
+
     pub fn up(&mut self) -> bool {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 
@@ -191,26 +218,25 @@ impl ViewState {
             );
         }
 
-        let mut line_end = 0;
-        for lm in &layout.line_metrics[.. layout.line_metrics.len() - 1] {
-            line_end += lm.length as usize;
-            if line.start + line_end == self.cursor_pos {
-                let (x, y) = layout.cursor_coords_trailing(self.cursor_pos - line.start);
-                let x = x.floor();
-                unsafe {
-                    rt.DrawLine(
-                        D2D1_POINT_2F {
-                            x: x0 + x,
-                            y: y0 + y },
-                        D2D1_POINT_2F {
-                            x: x0 + x,
-                            y: y0 + y + layout.line_height,
-                        },
-                        brush.as_raw(),
-                        2.0,  // strokeWidth
-                        null_mut(),  // strokeStyle
-                    );
-                }
+        let bounds = layout.line_boundaries();
+        assert!(bounds.len() >= 2);
+        let bounds = &bounds[1..bounds.len() - 1];
+        if bounds.contains(&(self.cursor_pos - line.start)) {
+            let (x, y) = layout.cursor_coords_trailing(self.cursor_pos - line.start);
+            let x = x.floor();
+            unsafe {
+                rt.DrawLine(
+                    D2D1_POINT_2F {
+                        x: x0 + x,
+                        y: y0 + y },
+                    D2D1_POINT_2F {
+                        x: x0 + x,
+                        y: y0 + y + layout.line_height,
+                    },
+                    brush.as_raw(),
+                    2.0,  // strokeWidth
+                    null_mut(),  // strokeStyle
+                );
             }
         }
     }

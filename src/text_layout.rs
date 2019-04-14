@@ -10,7 +10,7 @@ pub struct TextLayout {
     pub width: f32,
     pub height: f32,
     pub line_height: f32,
-    pub line_metrics: Vec<DWRITE_LINE_METRICS>,
+    line_metrics: Vec<DWRITE_LINE_METRICS>,
 }
 
 impl TextLayout {
@@ -125,5 +125,14 @@ impl TextLayout {
             assert!(hr == S_OK, "0x{:x}", hr);
         }
         metrics.textPosition as usize + is_trailing_hit as usize
+    }
+
+    pub fn line_boundaries(&self) -> Vec<usize> {
+        let mut result = Vec::new();
+        result.push(0);
+        for lm in &self.line_metrics {
+            result.push(result.last().unwrap() + lm.length as usize);
+        }
+        result
     }
 }

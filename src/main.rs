@@ -325,6 +325,16 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                         InvalidateRect(hWnd, null(), 1);
                     }
                 }
+                VK_HOME => {
+                    if view_state.home() {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
+                VK_END => {
+                    if view_state.end() {
+                        InvalidateRect(hWnd, null(), 1);
+                    }
+                }
                 VK_UP => {
                     if view_state.up() {
                         InvalidateRect(hWnd, null(), 1);
