@@ -29,7 +29,7 @@ mod line_gap_buffer;
 mod view_state;
 
 use com_ptr::ComPtr;
-use view_state::{ViewFrame, ViewState};
+use view_state::ViewState;
 
 fn win32_string(value: &str) -> Vec<u16> {
     OsStr::new(value).encode_wide().chain(Some(0)).collect()
@@ -206,7 +206,7 @@ const PADDING_LEFT: f32 = 5.0;
 
 fn paint() {
     let resources = unsafe { RESOURCES.as_ref().unwrap() };
-    let (view_frame, view_state) = unsafe { VIEW_STATE.as_mut().unwrap() };
+    let view_state = unsafe { VIEW_STATE.as_mut().unwrap() };
     let rt = &resources.render_target;
     unsafe {
         rt.BeginDraw();
@@ -217,7 +217,7 @@ fn paint() {
             x: PADDING_LEFT,
             y: 0.0,
         };
-        view_state.render(view_frame, origin, rt, &resources.brush);
+        view_state.render(origin, rt, &resources.brush);
 
         let hr = rt.EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
@@ -249,16 +249,15 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let app_state = AppState::new(hWnd);
             let resources = Resources::new(&app_state);
             let size = resources.render_target.GetSize();
-            let view_frame = ViewFrame {
-                width: size.width - PADDING_LEFT,
-                height: size.height,
-                text_format: resources.text_format.clone(),
-                dwrite_factory: app_state.dwrite_factory.clone(),
-            };
-            let view_state = ViewState::new(&view_frame);
+            let view_state = ViewState::new(
+                size.width - PADDING_LEFT,
+                size.height,
+                resources.text_format.clone(),
+                app_state.dwrite_factory.clone(),
+            );
             APP_STATE = Some(app_state);
             RESOURCES = Some(resources);
-            VIEW_STATE = Some((view_frame, view_state));
+            VIEW_STATE = Some(view_state);
             0
         }
         WM_SIZE => {
@@ -276,8 +275,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 assert!(hr == S_OK, "0x{:x}", hr);
 
                 let size = resources.render_target.GetSize();
-                let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
-                view_state.resize(view_frame, size.width - PADDING_LEFT, size.height);
+                let view_state = VIEW_STATE.as_mut().unwrap();
+                view_state.resize(size.width - PADDING_LEFT, size.height);
             }
             0
         }
@@ -285,8 +284,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_LBUTTONDOWN");
             let x = GET_X_LPARAM(lParam);
             let y = GET_Y_LPARAM(lParam);
-            let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
-            if view_state.click(view_frame, x as f32 - PADDING_LEFT, y as f32) {
+            let view_state = VIEW_STATE.as_mut().unwrap();
+            if view_state.click(x as f32 - PADDING_LEFT, y as f32) {
                 InvalidateRect(hWnd, null(), 1);
             }
             0
@@ -295,8 +294,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 {
-                let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
-                if view_state.insert_char(view_frame, c) {
+                let view_state = VIEW_STATE.as_mut().unwrap();
+                if view_state.insert_char(c) {
                     InvalidateRect(hWnd, null(), 1);
                 }
             }
@@ -304,30 +303,30 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_KEYDOWN => {
             println!("WM_KEYDOWN {}", wParam);
-            let (view_frame, view_state) = VIEW_STATE.as_mut().unwrap();
+            let view_state = VIEW_STATE.as_mut().unwrap();
             match wParam as i32 {
                 VK_BACK => {
-                    if view_state.backspace(view_frame) {
+                    if view_state.backspace() {
                         InvalidateRect(hWnd, null(), 1);
                     }
                 }
                 VK_DELETE => {
-                    if view_state.del(view_frame) {
+                    if view_state.del() {
                         InvalidateRect(hWnd, null(), 1);
                     }
                 }
                 VK_LEFT => {
-                    if view_state.left(view_frame) {
+                    if view_state.left() {
                         InvalidateRect(hWnd, null(), 1);
                     }
                 }
                 VK_RIGHT => {
-                    if view_state.right(view_frame) {
+                    if view_state.right() {
                         InvalidateRect(hWnd, null(), 1);
                     }
                 }
                 VK_RETURN => {
-                    if view_state.insert_char(view_frame, '\n') {
+                    if view_state.insert_char('\n') {
                         InvalidateRect(hWnd, null(), 1);
                     }
                 }
@@ -341,7 +340,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
 static mut APP_STATE: Option<AppState> = None;
 static mut RESOURCES: Option<Resources> = None;
-static mut VIEW_STATE: Option<(ViewFrame, ViewState)> = None;
+static mut VIEW_STATE: Option<ViewState> = None;
 
 fn main() -> Result<(), Error> {
     let _hwnd = create_window("an_editor", "тест")?;
