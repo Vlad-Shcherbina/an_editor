@@ -97,6 +97,34 @@ impl ViewState {
         }
     }
 
+    pub fn ctrl_left(&mut self) -> bool {
+        if self.cursor_pos > 0 {
+            self.cursor_pos -= 1;
+        }
+        while self.cursor_pos > 0 {
+            if self.document.get_char(self.cursor_pos - 1).is_whitespace() &&
+                !self.document.get_char(self.cursor_pos).is_whitespace() {
+                break;
+            }
+            self.cursor_pos -= 1;
+        }
+        true
+    }
+
+    pub fn ctrl_right(&mut self) -> bool {
+        while self.cursor_pos < self.document.len() {
+            self.cursor_pos += 1;
+            if self.cursor_pos == self.document.len() {
+                break;
+            }
+            if !self.document.get_char(self.cursor_pos - 1).is_whitespace() &&
+                self.document.get_char(self.cursor_pos).is_whitespace() {
+                break;
+            }
+        }
+        true
+    }
+
     pub fn home(&mut self) -> bool {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);

@@ -31,7 +31,7 @@ impl<T: Default> LineGapBuffer<T> {
         self.lines_left.len() + self.lines_right.len()
     }
 
-    fn get_char(&self, pos: usize) -> char {
+    pub fn get_char(&self, pos: usize) -> char {
         if pos < self.chars_left.len() {
             self.chars_left[pos]
         } else {

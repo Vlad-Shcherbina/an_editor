@@ -308,8 +308,18 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let need_redraw = match wParam as i32 {
                 VK_BACK => view_state.backspace(),
                 VK_DELETE => view_state.del(),
-                VK_LEFT => view_state.left(),
-                VK_RIGHT => view_state.right(),
+                VK_LEFT =>
+                    if ctrl_pressed {
+                        view_state.ctrl_left()
+                    } else {
+                        view_state.left()
+                    }
+                VK_RIGHT =>
+                    if ctrl_pressed {
+                        view_state.ctrl_right()
+                    } else {
+                        view_state.right()
+                    }
                 VK_HOME =>
                     if ctrl_pressed {
                         view_state.ctrl_home()
