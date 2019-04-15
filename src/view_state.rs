@@ -125,6 +125,18 @@ impl ViewState {
         true
     }
 
+    pub fn ctrl_home(&mut self) -> bool {
+        self.cursor_pos = 0;
+        self.ensure_cursor_on_screen();
+        true
+    }
+
+    pub fn ctrl_end(&mut self) -> bool {
+        self.cursor_pos = self.document.len();
+        self.ensure_cursor_on_screen();
+        true
+    }
+
     pub fn up(&mut self) -> bool {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 

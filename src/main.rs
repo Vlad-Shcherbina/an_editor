@@ -304,6 +304,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_KEYDOWN => {
             println!("WM_KEYDOWN {}", wParam);
             let view_state = VIEW_STATE.as_mut().unwrap();
+            let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
             match wParam as i32 {
                 VK_BACK => {
                     if view_state.backspace() {
@@ -326,13 +327,25 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     }
                 }
                 VK_HOME => {
-                    if view_state.home() {
-                        InvalidateRect(hWnd, null(), 1);
+                    if ctrl_pressed {
+                        if view_state.ctrl_home() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
+                    } else {
+                        if view_state.home() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
                     }
                 }
                 VK_END => {
-                    if view_state.end() {
-                        InvalidateRect(hWnd, null(), 1);
+                    if ctrl_pressed {
+                        if view_state.ctrl_end() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
+                    } else {
+                        if view_state.end() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
                     }
                 }
                 VK_UP => {
