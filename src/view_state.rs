@@ -121,8 +121,7 @@ impl ViewState {
         let bounds = layout.line_boundaries();
         let &end = bounds.last().unwrap();
         self.cursor_pos = line.start + bounds.into_iter()
-            .filter(|&x| x > self.cursor_pos - line.start)
-            .next()
+            .find(|&x| x > self.cursor_pos - line.start)
             .unwrap_or(end);
         self.ensure_cursor_on_screen();
         true
@@ -347,11 +346,12 @@ impl ViewState {
     }
 
     fn vertical_offset(&mut self, mut line_no1: usize, mut line_no2: usize) -> f32 {
-        let mut sign = 1.0;
-        if line_no1 > line_no2 {
+        let sign = if line_no1 > line_no2 {
             std::mem::swap(&mut line_no1, &mut line_no2);
-            sign = -1.0;
-        }
+            -1.0
+        } else {
+            1.0
+        };
         let mut result = 0.0;
         for i in line_no1..line_no2 {
             self.ensure_layout(i);
