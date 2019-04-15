@@ -163,6 +163,28 @@ impl ViewState {
         true
     }
 
+    pub fn ctrl_up(&mut self) -> bool {
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        // TODO: what if line below has different height
+        self.anchor_y += layout.line_height;
+        self.anchor_to_top();
+        true
+    }
+
+    pub fn ctrl_down(&mut self) -> bool {
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        // TODO: what if line below has different height
+        self.anchor_y -= layout.line_height;
+        self.anchor_to_top();
+        true
+    }
+
     pub fn pg_up(&mut self) -> bool {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 

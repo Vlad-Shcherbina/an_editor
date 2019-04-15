@@ -349,13 +349,25 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     }
                 }
                 VK_UP => {
-                    if view_state.up() {
-                        InvalidateRect(hWnd, null(), 1);
+                    if ctrl_pressed {
+                        if view_state.ctrl_up() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
+                    } else {
+                        if view_state.up() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
                     }
                 }
                 VK_DOWN => {
-                    if view_state.down() {
-                        InvalidateRect(hWnd, null(), 1);
+                    if ctrl_pressed  {
+                        if view_state.ctrl_down() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
+                    } else {
+                        if view_state.down() {
+                            InvalidateRect(hWnd, null(), 1);
+                        }
                     }
                 }
                 VK_PRIOR => {
