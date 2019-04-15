@@ -15,6 +15,9 @@ pub struct ViewState {
 
     document: LineGapBuffer<Option<TextLayout>>,
     cursor_pos: usize,
+
+    anchor_pos: usize,
+    anchor_y: f32,
 }
 
 impl ViewState {
@@ -42,6 +45,8 @@ impl ViewState {
             dwrite_factory,
             document,
             cursor_pos: 0,
+            anchor_pos: 100,
+            anchor_y: 200.0,
         }
     }
 
@@ -152,36 +157,37 @@ impl ViewState {
     }
 
     pub fn click(&mut self, x: f32, y: f32) -> bool {
-        let mut y0 = 0.0;
-        for i in 0..self.document.num_lines() {
+        let (mut i, mut y0) = self.anchor_line_and_y();
+        while i > 0 && y0 > y {
+            self.ensure_layout(i - 1);
+            let line = self.document.get_line(i - 1);
+            let layout = line.data.as_ref().unwrap();
+            i -= 1;
+            y0 -= layout.height;
+        }
+        loop {
             self.ensure_layout(i);
             let line = self.document.get_line(i);
             let layout = line.data.as_ref().unwrap();
-            if (i == 0 || y >= y0) &&
-               (i + 1 == self.document.num_lines() || y < y0 + layout.height) {
+            if y < y0 + layout.height || i + 1 == self.document.num_lines() {
                 let pos = layout.coords_to_pos(x, y - y0);
                 assert!(pos <= line.end - line.start);
                 self.cursor_pos = line.start + pos;
                 return true;
             }
+            i += 1;
             y0 += layout.height;
         }
-        unreachable!()
     }
 
     fn pos_to_coord(&mut self, pos: usize) -> (f32, f32) {
-        let mut y0 = 0.0;
-        for i in 0..self.document.num_lines() {
-            self.ensure_layout(i);
-            let line = self.document.get_line(i);
-            let layout = line.data.as_ref().unwrap();
-            if line.start <= pos && pos <= line.end {
-                let (x, y) = layout.cursor_coords(pos - line.start);
-                return (x, y + y0);
-            }
-            y0 += layout.height;
-        }
-        unreachable!()
+        let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
+        let line_no = self.document.find_line(pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        let (x, y) = layout.cursor_coords(pos - line.start);
+        (x, anchor_line_y + self.vertical_offset(anchor_line, line_no) + y)
     }
 
     pub fn resize(&mut self, width: f32, height: f32) {
@@ -228,7 +234,8 @@ impl ViewState {
                 rt.DrawLine(
                     D2D1_POINT_2F {
                         x: x0 + x,
-                        y: y0 + y },
+                        y: y0 + y,
+                    },
                     D2D1_POINT_2F {
                         x: x0 + x,
                         y: y0 + y + layout.line_height,
@@ -247,11 +254,10 @@ impl ViewState {
         rt: &ComPtr<ID2D1HwndRenderTarget>,
         brush: &ComPtr<ID2D1Brush>,
     ) {
-        let mut y0 = 0.0;
-        for i in 0..self.document.num_lines() {
-            if y0 > self.height {
-                break;
-            }
+        let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
+        let (mut y0, line_no1, line_no2) =
+            self.lines_on_screen(anchor_line, anchor_line_y);
+        for i in line_no1..line_no2 {
             self.ensure_layout(i);
             let line = self.document.get_line(i);
             let layout = line.data.as_ref().unwrap();
@@ -268,5 +274,63 @@ impl ViewState {
             }
             y0 += layout.height;
         }
+    }
+
+    fn vertical_offset(&mut self, mut line_no1: usize, mut line_no2: usize) -> f32 {
+        let mut sign = 1.0;
+        if line_no1 > line_no2 {
+            std::mem::swap(&mut line_no1, &mut line_no2);
+            sign = -1.0;
+        }
+        let mut result = 0.0;
+        for i in line_no1..line_no2 {
+            self.ensure_layout(i);
+            let line = self.document.get_line(i);
+            let layout = line.data.as_ref().unwrap();
+            result += layout.height;
+        }
+        result * sign
+    }
+
+    fn anchor_line_and_y(&mut self) -> (usize, f32) {
+        let anchor_line = self.document.find_line(self.anchor_pos);
+        self.ensure_layout(anchor_line);
+        let line = self.document.get_line(anchor_line);
+        let layout = line.data.as_ref().unwrap();
+        let (_x, y) = layout.cursor_coords(self.anchor_pos - line.start);
+        let anchor_line_y = self.anchor_y - y;
+        (anchor_line, anchor_line_y)
+    }
+
+    fn lines_on_screen(&mut self, line_no: usize, line_y: f32) -> (f32, usize, usize) {
+        let mut i = line_no;
+        let mut y = line_y;
+        while i > 0 && y > 0.0 {
+            self.ensure_layout(i - 1);
+            let line = self.document.get_line(i - 1);
+            let layout = line.data.as_ref().unwrap();
+            i -= 1;
+            y -= layout.height;
+        }
+        while i < self.document.num_lines() {
+            self.ensure_layout(i);
+            let line = self.document.get_line(i);
+            let layout = line.data.as_ref().unwrap();
+            if y + layout.height > 0.0 {
+                break;
+            }
+            i += 1;
+            y += layout.height;
+        }
+        let start_y = y;
+        let start_line = i;
+        while i < self.document.num_lines() && y < self.height {
+            self.ensure_layout(i);
+            let line = self.document.get_line(i);
+            let layout = line.data.as_ref().unwrap();
+            i += 1;
+            y += layout.height;
+        }
+        (start_y, start_line, i)
     }
 }
