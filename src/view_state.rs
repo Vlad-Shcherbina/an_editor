@@ -28,7 +28,7 @@ impl ViewState {
         dwrite_factory: ComPtr<IDWriteFactory>,
     ) -> ViewState {
         let mut text = "hello, world".to_owned();
-        for _ in 0..5 {
+        for _ in 0..50 {
             text.push_str("\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.");
         }
         let text: Vec<char> = text.chars().collect();
@@ -45,14 +45,15 @@ impl ViewState {
             dwrite_factory,
             document,
             cursor_pos: 0,
-            anchor_pos: 100,
-            anchor_y: 200.0,
+            anchor_pos: 0,
+            anchor_y: 0.0,
         }
     }
 
     pub fn insert_char(&mut self, c: char) -> bool {
         self.document.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
         self.cursor_pos += 1;
+        self.ensure_cursor_on_screen();
         true
     }
 
@@ -60,6 +61,7 @@ impl ViewState {
         if self.cursor_pos > 0 {
             self.cursor_pos -=1;
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
+            self.ensure_cursor_on_screen();
             true
         } else {
             false
@@ -70,6 +72,7 @@ impl ViewState {
         if self.right() {
             let changed = self.backspace();
             assert!(changed);
+            self.ensure_cursor_on_screen();
             true
         } else {
             false
@@ -79,6 +82,7 @@ impl ViewState {
     pub fn left(&mut self) -> bool {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
+            self.ensure_cursor_on_screen();
             true
         } else {
             false
@@ -88,6 +92,7 @@ impl ViewState {
     pub fn right(&mut self) -> bool {
         if self.cursor_pos < self.document.len() {
             self.cursor_pos += 1;
+            self.ensure_cursor_on_screen();
             true
         } else {
             false
@@ -104,6 +109,7 @@ impl ViewState {
             .filter(|&x| x < self.cursor_pos - line.start)
             .last()
             .unwrap_or(0);
+        self.ensure_cursor_on_screen();
         true
     }
 
@@ -118,6 +124,7 @@ impl ViewState {
             .filter(|&x| x > self.cursor_pos - line.start)
             .next()
             .unwrap_or(end);
+        self.ensure_cursor_on_screen();
         true
     }
 
@@ -130,6 +137,7 @@ impl ViewState {
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line above has different height?
         self.click(x, y - layout.line_height * 0.5);
+        self.ensure_cursor_on_screen();
         true
     }
 
@@ -142,7 +150,51 @@ impl ViewState {
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line below has different height?
         self.click(x, y + layout.line_height * 1.5);
+        self.ensure_cursor_on_screen();
         true
+    }
+
+    fn ensure_cursor_on_screen(&mut self) {
+        // TODO: when jumping large distances it will force layout
+        // on all lines in between, it's slow
+        let (_x, y) = self.pos_to_coord(self.cursor_pos);
+        let i = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(i);
+        let line = self.document.get_line(i);
+        let layout = line.data.as_ref().unwrap();
+        if y < 0.0 {
+            self.anchor_pos = self.cursor_pos;
+            self.anchor_y = 0.0;
+        }
+        // TODO: what if lines has different heights
+        if y + layout.line_height > self.height {
+            self.anchor_pos = self.cursor_pos;
+            self.anchor_y = self.height - layout.line_height;
+        }
+        self.anchor_to_top();
+    }
+
+    fn anchor_to_top(&mut self) {
+        let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
+        let (_y0, line_no1, line_no2) =
+            self.lines_on_screen(anchor_line, anchor_line_y);
+        assert!(line_no1 < self.document.num_lines());
+
+        for line_no in line_no1..line_no2 {
+            self.ensure_layout(line_no);
+            let line = self.document.get_line(line_no);
+            let line_start = line.start;
+            let layout = line.data.as_ref().unwrap();
+            let bounds = layout.line_boundaries();
+            for &b in &bounds[..bounds.len() - 1] {
+                let (_x, y) = self.pos_to_coord(line_start + b);
+                if y >= 0.0 {
+                    self.anchor_pos = line_start + b;
+                    self.anchor_y = y;
+                    return;
+                }
+            }
+        }
     }
 
     fn ensure_layout(&mut self, line_no: usize) {
@@ -173,6 +225,7 @@ impl ViewState {
                 let pos = layout.coords_to_pos(x, y - y0);
                 assert!(pos <= line.end - line.start);
                 self.cursor_pos = line.start + pos;
+                self.ensure_cursor_on_screen();
                 return true;
             }
             i += 1;
@@ -273,6 +326,23 @@ impl ViewState {
                 self.draw_cursor(origin.x, origin.y + y0, line, rt, brush);
             }
             y0 += layout.height;
+        }
+        // TODO: remove, it's only for debugging
+        let (x, y) = self.pos_to_coord(self.anchor_pos);
+        unsafe {
+            rt.DrawLine(
+                D2D1_POINT_2F {
+                    x: origin.x + x - 2.0,
+                    y: origin.y + y + 2.0,
+                },
+                D2D1_POINT_2F {
+                    x: origin.x + x + 2.0,
+                    y: origin.y + y + 2.0,
+                },
+                brush.as_raw(),
+                3.0,  // strokeWidth
+                null_mut(),  // strokeStyle
+            );
         }
     }
 
