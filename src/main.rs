@@ -305,87 +305,42 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {}", wParam);
             let view_state = VIEW_STATE.as_mut().unwrap();
             let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
-            match wParam as i32 {
-                VK_BACK => {
-                    if view_state.backspace() {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                VK_DELETE => {
-                    if view_state.del() {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                VK_LEFT => {
-                    if view_state.left() {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                VK_RIGHT => {
-                    if view_state.right() {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                VK_HOME => {
+            let need_redraw = match wParam as i32 {
+                VK_BACK => view_state.backspace(),
+                VK_DELETE => view_state.del(),
+                VK_LEFT => view_state.left(),
+                VK_RIGHT => view_state.right(),
+                VK_HOME =>
                     if ctrl_pressed {
-                        if view_state.ctrl_home() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.ctrl_home()
                     } else {
-                        if view_state.home() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.home()
                     }
-                }
-                VK_END => {
+                VK_END =>
                     if ctrl_pressed {
-                        if view_state.ctrl_end() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.ctrl_end()
                     } else {
-                        if view_state.end() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.end()
                     }
-                }
-                VK_UP => {
+                VK_UP =>
                     if ctrl_pressed {
-                        if view_state.ctrl_up() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.ctrl_up()
                     } else {
-                        if view_state.up() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.up()
                     }
-                }
-                VK_DOWN => {
+                VK_DOWN =>
                     if ctrl_pressed  {
-                        if view_state.ctrl_down() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.ctrl_down()
                     } else {
-                        if view_state.down() {
-                            InvalidateRect(hWnd, null(), 1);
-                        }
+                        view_state.down()
                     }
-                }
-                VK_PRIOR => {
-                    if view_state.pg_up() {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                VK_NEXT => {
-                    if view_state.pg_down() {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                VK_RETURN => {
-                    if view_state.insert_char('\n') {
-                        InvalidateRect(hWnd, null(), 1);
-                    }
-                }
-                _ => {}
+                VK_PRIOR => view_state.pg_up(),
+                VK_NEXT => view_state.pg_down(),
+                VK_RETURN => view_state.insert_char('\n'),
+                _ => false
+            };
+            if need_redraw {
+                InvalidateRect(hWnd, null(), 1);
             }
             0
         }
