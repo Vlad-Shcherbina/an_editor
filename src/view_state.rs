@@ -27,10 +27,8 @@ impl ViewState {
         text_format: ComPtr<IDWriteTextFormat>,
         dwrite_factory: ComPtr<IDWriteFactory>,
     ) -> ViewState {
-        let mut text = "hello, world".to_owned();
-        for _ in 0..50 {
-            text.push_str("\nLorem ipsum dolor sit amet, consectetur adipiscing elit, sed do eiusmod tempor incididunt ut labore et dolore magna aliqua. Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.");
-        }
+        let text = std::fs::read_to_string("samples/idiot-dostoievskii.txt").unwrap();
+        let text = text.replace("\r\n", "\n");
         let text: Vec<char> = text.chars().collect();
         let mut document = LineGapBuffer::new();
         document.replace_slice(0, 0, &text);
@@ -149,6 +147,32 @@ impl ViewState {
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line below has different height?
         self.click(x, y + layout.line_height * 1.5);
+        self.ensure_cursor_on_screen();
+        true
+    }
+
+    pub fn pg_up(&mut self) -> bool {
+        let (x, y) = self.pos_to_coord(self.cursor_pos);
+
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        // TODO: what if lines has different heights?
+        self.click(x, y + layout.line_height * 1.5 - self.height);
+        self.ensure_cursor_on_screen();
+        true
+    }
+
+    pub fn pg_down(&mut self) -> bool {
+        let (x, y) = self.pos_to_coord(self.cursor_pos);
+
+        let line_no = self.document.find_line(self.cursor_pos);
+        self.ensure_layout(line_no);
+        let line = self.document.get_line(line_no);
+        let layout = line.data.as_ref().unwrap();
+        // TODO: what if lines has different heights?
+        self.click(x, y - layout.line_height * 0.5 + self.height);
         self.ensure_cursor_on_screen();
         true
     }
