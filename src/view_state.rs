@@ -55,22 +55,53 @@ impl ViewState {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        if self.selection_pos != self.cursor_pos {
+            let a = self.cursor_pos.min(self.selection_pos);
+            let b = self.cursor_pos.max(self.selection_pos);
+            self.document.replace_slice(a, b, &[c]);
+            self.cursor_pos = a + 1;
+            self.clear_selection();
+            self.ensure_cursor_on_screen();
+            return;
+        }
         self.document.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
         self.cursor_pos += 1;
+        self.clear_selection();
         self.ensure_cursor_on_screen();
     }
 
     pub fn backspace(&mut self) {
+        if self.selection_pos != self.cursor_pos {
+            let a = self.cursor_pos.min(self.selection_pos);
+            let b = self.cursor_pos.max(self.selection_pos);
+            self.document.replace_slice(a, b, &[]);
+            self.cursor_pos = a;
+            self.clear_selection();
+            self.ensure_cursor_on_screen();
+            return;
+        }
         if self.cursor_pos > 0 {
             self.cursor_pos -=1;
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
+            self.clear_selection();
             self.ensure_cursor_on_screen();
         }
     }
 
     pub fn del(&mut self) {
+        if self.selection_pos != self.cursor_pos {
+            let a = self.cursor_pos.min(self.selection_pos);
+            let b = self.cursor_pos.max(self.selection_pos);
+            self.document.replace_slice(a, b, &[]);
+            self.cursor_pos = a;
+            self.clear_selection();
+            self.ensure_cursor_on_screen();
+            return;
+        }
         if self.cursor_pos < self.document.len() {
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
+            self.clear_selection();
+            self.ensure_cursor_on_screen();
         }
     }
 
