@@ -44,10 +44,14 @@ impl ViewState {
             dwrite_factory,
             document,
             cursor_pos: 0,
-            selection_pos: 100,
+            selection_pos: 0,
             anchor_pos: 0,
             anchor_y: 0.0,
         }
+    }
+
+    pub fn clear_selection(&mut self) {
+        self.selection_pos = self.cursor_pos;
     }
 
     pub fn insert_char(&mut self, c: char) {

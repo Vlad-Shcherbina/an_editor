@@ -312,10 +312,18 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {}", wParam);
             let view_state = VIEW_STATE.as_mut().unwrap();
             let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
+            let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
             let mut need_redraw = true;
+            let mut regular_movement_cmd = true;
             match wParam as i32 {
-                VK_BACK => view_state.backspace(),
-                VK_DELETE => view_state.del(),
+                VK_BACK => {
+                    view_state.backspace();
+                    regular_movement_cmd = false;
+                }
+                VK_DELETE => {
+                    view_state.del();
+                    regular_movement_cmd = false;
+                }
                 VK_LEFT =>
                     if ctrl_pressed {
                         view_state.ctrl_left()
@@ -354,9 +362,20 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     }
                 VK_PRIOR => view_state.pg_up(),
                 VK_NEXT => view_state.pg_down(),
-                VK_RETURN => view_state.insert_char('\n'),
-                _ => { need_redraw = false; }
+                VK_RETURN => {
+                    view_state.insert_char('\n');
+                    regular_movement_cmd = false;
+                }
+                _ => {
+                    need_redraw = false;
+                    regular_movement_cmd = false;
+                }
             };
+            if regular_movement_cmd {
+                if !shift_pressed {
+                    view_state.clear_selection();
+                }
+            }
             if need_redraw {
                 InvalidateRect(hWnd, null(), 1);
             }
