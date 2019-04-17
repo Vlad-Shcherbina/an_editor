@@ -50,56 +50,41 @@ impl ViewState {
         }
     }
 
-    pub fn insert_char(&mut self, c: char) -> bool {
+    pub fn insert_char(&mut self, c: char) {
         self.document.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
         self.cursor_pos += 1;
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn backspace(&mut self) -> bool {
+    pub fn backspace(&mut self) {
         if self.cursor_pos > 0 {
             self.cursor_pos -=1;
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.ensure_cursor_on_screen();
-            true
-        } else {
-            false
         }
     }
 
-    pub fn del(&mut self) -> bool {
-        if self.right() {
-            let changed = self.backspace();
-            assert!(changed);
-            self.ensure_cursor_on_screen();
-            true
-        } else {
-            false
+    pub fn del(&mut self) {
+        if self.cursor_pos < self.document.len() {
+            self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
         }
     }
 
-    pub fn left(&mut self) -> bool {
+    pub fn left(&mut self) {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
             self.ensure_cursor_on_screen();
-            true
-        } else {
-            false
         }
     }
 
-    pub fn right(&mut self) -> bool {
+    pub fn right(&mut self) {
         if self.cursor_pos < self.document.len() {
             self.cursor_pos += 1;
             self.ensure_cursor_on_screen();
-            true
-        } else {
-            false
         }
     }
 
-    pub fn ctrl_left(&mut self) -> bool {
+    pub fn ctrl_left(&mut self) {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
         }
@@ -110,10 +95,9 @@ impl ViewState {
             }
             self.cursor_pos -= 1;
         }
-        true
     }
 
-    pub fn ctrl_right(&mut self) -> bool {
+    pub fn ctrl_right(&mut self) {
         while self.cursor_pos < self.document.len() {
             self.cursor_pos += 1;
             if self.cursor_pos == self.document.len() {
@@ -124,10 +108,9 @@ impl ViewState {
                 break;
             }
         }
-        true
     }
 
-    pub fn home(&mut self) -> bool {
+    pub fn home(&mut self) {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
@@ -138,10 +121,9 @@ impl ViewState {
             .last()
             .unwrap_or(0);
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn end(&mut self) -> bool {
+    pub fn end(&mut self) {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
@@ -152,22 +134,19 @@ impl ViewState {
             .find(|&x| x > self.cursor_pos - line.start)
             .unwrap_or(end);
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn ctrl_home(&mut self) -> bool {
+    pub fn ctrl_home(&mut self) {
         self.cursor_pos = 0;
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn ctrl_end(&mut self) -> bool {
+    pub fn ctrl_end(&mut self) {
         self.cursor_pos = self.document.len();
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn up(&mut self) -> bool {
+    pub fn up(&mut self) {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
@@ -177,10 +156,9 @@ impl ViewState {
         // TODO: what if line above has different height?
         self.click(x, y - layout.line_height * 0.5);
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn down(&mut self) -> bool {
+    pub fn down(&mut self) {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
@@ -190,10 +168,9 @@ impl ViewState {
         // TODO: what if line below has different height?
         self.click(x, y + layout.line_height * 1.5);
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn ctrl_up(&mut self) -> bool {
+    pub fn ctrl_up(&mut self) {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
@@ -201,10 +178,9 @@ impl ViewState {
         // TODO: what if line below has different height
         self.anchor_y += layout.line_height;
         self.anchor_to_top();
-        true
     }
 
-    pub fn ctrl_down(&mut self) -> bool {
+    pub fn ctrl_down(&mut self) {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
@@ -212,10 +188,9 @@ impl ViewState {
         // TODO: what if line below has different height
         self.anchor_y -= layout.line_height;
         self.anchor_to_top();
-        true
     }
 
-    pub fn pg_up(&mut self) -> bool {
+    pub fn pg_up(&mut self) {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
@@ -225,10 +200,9 @@ impl ViewState {
         // TODO: what if lines has different heights?
         self.click(x, y + layout.line_height * 1.5 - self.height);
         self.ensure_cursor_on_screen();
-        true
     }
 
-    pub fn pg_down(&mut self) -> bool {
+    pub fn pg_down(&mut self) {
         let (x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
@@ -238,7 +212,6 @@ impl ViewState {
         // TODO: what if lines has different heights?
         self.click(x, y - layout.line_height * 0.5 + self.height);
         self.ensure_cursor_on_screen();
-        true
     }
 
     fn ensure_cursor_on_screen(&mut self) {
@@ -295,7 +268,7 @@ impl ViewState {
         }
     }
 
-    pub fn click(&mut self, x: f32, y: f32) -> bool {
+    pub fn click(&mut self, x: f32, y: f32) {
         let (mut i, mut y0) = self.anchor_line_and_y();
         while i > 0 && y0 > y {
             self.ensure_layout(i - 1);
@@ -313,7 +286,7 @@ impl ViewState {
                 assert!(pos <= line.end - line.start);
                 self.cursor_pos = line.start + pos;
                 self.ensure_cursor_on_screen();
-                return true;
+                return;
             }
             i += 1;
             y0 += layout.height;

@@ -294,9 +294,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let x = GET_X_LPARAM(lParam);
             let y = GET_Y_LPARAM(lParam);
             let view_state = VIEW_STATE.as_mut().unwrap();
-            if view_state.click(x as f32 - PADDING_LEFT, y as f32) {
-                InvalidateRect(hWnd, null(), 1);
-            }
+            view_state.click(x as f32 - PADDING_LEFT, y as f32);
+            InvalidateRect(hWnd, null(), 1);
             0
         }
         WM_CHAR => {
@@ -304,9 +303,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 {
                 let view_state = VIEW_STATE.as_mut().unwrap();
-                if view_state.insert_char(c) {
-                    InvalidateRect(hWnd, null(), 1);
-                }
+                view_state.insert_char(c);
+                InvalidateRect(hWnd, null(), 1);
             }
             0
         }
@@ -314,7 +312,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {}", wParam);
             let view_state = VIEW_STATE.as_mut().unwrap();
             let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
-            let need_redraw = match wParam as i32 {
+            let mut need_redraw = true;
+            match wParam as i32 {
                 VK_BACK => view_state.backspace(),
                 VK_DELETE => view_state.del(),
                 VK_LEFT =>
@@ -356,7 +355,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 VK_PRIOR => view_state.pg_up(),
                 VK_NEXT => view_state.pg_down(),
                 VK_RETURN => view_state.insert_char('\n'),
-                _ => false
+                _ => { need_redraw = false; }
             };
             if need_redraw {
                 InvalidateRect(hWnd, null(), 1);
