@@ -295,6 +295,10 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let y = GET_Y_LPARAM(lParam);
             let view_state = VIEW_STATE.as_mut().unwrap();
             view_state.click(x as f32 - PADDING_LEFT, y as f32);
+            let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
+            if !shift_pressed {
+                view_state.clear_selection();
+            }
             InvalidateRect(hWnd, null(), 1);
             0
         }

@@ -189,7 +189,7 @@ impl ViewState {
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line above has different height?
-        self.click(x, y - layout.line_height * 0.5);
+        self.cursor_pos = self.coord_to_pos(x, y - layout.line_height * 0.5);
         self.ensure_cursor_on_screen();
     }
 
@@ -201,7 +201,7 @@ impl ViewState {
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line below has different height?
-        self.click(x, y + layout.line_height * 1.5);
+        self.cursor_pos = self.coord_to_pos(x, y + layout.line_height * 1.5);
         self.ensure_cursor_on_screen();
     }
 
@@ -233,7 +233,7 @@ impl ViewState {
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if lines has different heights?
-        self.click(x, y + layout.line_height * 1.5 - self.height);
+        self.cursor_pos = self.coord_to_pos(x, y + layout.line_height * 1.5 - self.height);
         self.ensure_cursor_on_screen();
     }
 
@@ -245,7 +245,7 @@ impl ViewState {
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if lines has different heights?
-        self.click(x, y - layout.line_height * 0.5 + self.height);
+        self.cursor_pos = self.coord_to_pos(x, y - layout.line_height * 0.5 + self.height);
         self.ensure_cursor_on_screen();
     }
 
@@ -303,7 +303,7 @@ impl ViewState {
         }
     }
 
-    pub fn click(&mut self, x: f32, y: f32) {
+    pub fn coord_to_pos(&mut self, x: f32, y: f32) -> usize {
         let (mut i, mut y0) = self.anchor_line_and_y();
         while i > 0 && y0 > y {
             self.ensure_layout(i - 1);
@@ -319,13 +319,16 @@ impl ViewState {
             if y < y0 + layout.height || i + 1 == self.document.num_lines() {
                 let pos = layout.coords_to_pos(x, y - y0);
                 assert!(pos <= line.end - line.start);
-                self.cursor_pos = line.start + pos;
-                self.ensure_cursor_on_screen();
-                return;
+                return line.start + pos;
             }
             i += 1;
             y0 += layout.height;
         }
+    }
+
+    pub fn click(&mut self, x: f32, y: f32) {
+        self.cursor_pos = self.coord_to_pos(x, y);
+        self.ensure_cursor_on_screen();
     }
 
     fn pos_to_coord(&mut self, pos: usize) -> (f32, f32) {
