@@ -130,6 +130,7 @@ impl ViewState {
             }
             self.cursor_pos -= 1;
         }
+        self.ensure_cursor_on_screen();
     }
 
     pub fn ctrl_right(&mut self) {
@@ -143,6 +144,7 @@ impl ViewState {
                 break;
             }
         }
+        self.ensure_cursor_on_screen();
     }
 
     pub fn home(&mut self) {
