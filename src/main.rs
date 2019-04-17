@@ -302,6 +302,17 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             InvalidateRect(hWnd, null(), 1);
             0
         }
+        WM_MOUSEMOVE => {
+            println!("WM_MOUSEMOVE");
+            if wParam & MK_LBUTTON != 0 {
+                let x = GET_X_LPARAM(lParam);
+                let y = GET_Y_LPARAM(lParam);
+                let view_state = VIEW_STATE.as_mut().unwrap();
+                view_state.click(x as f32 - PADDING_LEFT, y as f32);
+                InvalidateRect(hWnd, null(), 1);
+            }
+            0
+        }
         WM_MOUSEWHEEL => {
             let delta = GET_WHEEL_DELTA_WPARAM(wParam);
             println!("WM_MOUSEWHEEL {}", delta);
