@@ -302,6 +302,22 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             InvalidateRect(hWnd, null(), 1);
             0
         }
+        WM_MOUSEWHEEL => {
+            let delta = GET_WHEEL_DELTA_WPARAM(wParam);
+            println!("WM_MOUSEWHEEL {}", delta);
+            let mut scroll_lines: UINT = 0;
+            let res = SystemParametersInfoW(
+                SPI_GETWHEELSCROLLLINES,
+                0,
+                &mut scroll_lines as *mut _ as *mut _,
+                0);
+            assert!(res != 0);
+            let delta = delta as f32 / 120.0 * scroll_lines as f32;
+            let view_state = VIEW_STATE.as_mut().unwrap();
+            view_state.scroll(delta);
+            InvalidateRect(hWnd, null(), 1);
+            0
+        }
         WM_CHAR => {
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
@@ -354,13 +370,13 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     }
                 VK_UP =>
                     if ctrl_pressed {
-                        view_state.ctrl_up()
+                        view_state.scroll(1.0)
                     } else {
                         view_state.up()
                     }
                 VK_DOWN =>
                     if ctrl_pressed  {
-                        view_state.ctrl_down()
+                        view_state.scroll(-1.0)
                     } else {
                         view_state.down()
                     }

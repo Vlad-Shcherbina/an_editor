@@ -205,23 +205,13 @@ impl ViewState {
         self.ensure_cursor_on_screen();
     }
 
-    pub fn ctrl_up(&mut self) {
+    pub fn scroll(&mut self, delta: f32) {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
-        // TODO: what if line below has different height
-        self.anchor_y += layout.line_height;
-        self.anchor_to_top();
-    }
-
-    pub fn ctrl_down(&mut self) {
-        let line_no = self.document.find_line(self.cursor_pos);
-        self.ensure_layout(line_no);
-        let line = self.document.get_line(line_no);
-        let layout = line.data.as_ref().unwrap();
-        // TODO: what if line below has different height
-        self.anchor_y -= layout.line_height;
+        // TODO: what if lines have different heights
+        self.anchor_y += delta * layout.line_height;
         self.anchor_to_top();
     }
 
