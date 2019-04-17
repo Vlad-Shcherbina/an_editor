@@ -212,7 +212,7 @@ impl ViewState {
         let layout = line.data.as_ref().unwrap();
         // TODO: what if lines have different heights
         self.anchor_y += delta * layout.line_height;
-        self.anchor_to_top();
+        self.clip_scroll_position_to_document();
     }
 
     pub fn pg_up(&mut self) {
@@ -256,6 +256,22 @@ impl ViewState {
             self.anchor_pos = self.cursor_pos;
             self.anchor_y = self.height - layout.line_height;
         }
+        self.clip_scroll_position_to_document();
+    }
+
+    fn clip_scroll_position_to_document(&mut self) {
+        let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
+        let (y1, line_no1, line_no2) =
+            self.lines_on_screen(anchor_line, anchor_line_y);
+        if y1 > 0.0 {
+            assert!(line_no1 == 0);
+            self.anchor_y -= y1;
+        } else if line_no2 == self.document.num_lines() {
+            let (_x, y2) = self.pos_to_coord(self.document.len());
+            if y2 < 0.0 {
+                self.anchor_y -= y2;
+            }
+        }
         self.anchor_to_top();
     }
 
@@ -263,7 +279,6 @@ impl ViewState {
         let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
         let (_y0, line_no1, line_no2) =
             self.lines_on_screen(anchor_line, anchor_line_y);
-        assert!(line_no1 < self.document.num_lines());
 
         for line_no in line_no1..line_no2 {
             self.ensure_layout(line_no);
