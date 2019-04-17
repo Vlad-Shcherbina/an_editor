@@ -72,6 +72,7 @@ impl TextLayout {
             };
         }
         assert!(hr == S_OK, "0x{:x}", hr);
+        line_metrics.truncate(actual_line_count as usize);
 
         TextLayout {
             raw,
@@ -134,5 +135,26 @@ impl TextLayout {
             result.push(result.last().unwrap() + lm.length as usize);
         }
         result
+    }
+
+    pub fn get_selection_rects(&self, start_pos: usize, end_pos: usize) -> Vec<(f32, f32, f32, f32)> {
+        assert!(start_pos <= end_pos);
+        let mut metrics = vec![unsafe { std::mem::zeroed() }; self.line_metrics.len()];
+        let mut actual_count = 0;
+        let hr = unsafe {
+            self.raw.HitTestTextRange(
+                start_pos as u32, (end_pos - start_pos) as u32,
+                0.0, 0.0,  // origin
+                metrics.as_mut_ptr(),
+                metrics.len() as u32,
+                &mut actual_count,
+            )
+        };
+
+        // TODO: hr == HRESULT_FROM_WIN32(ERROR_INSUFFICIENT_BUFFER)
+        assert!(hr == S_OK, "0x{:x}", hr);
+        metrics.truncate(actual_count as usize);
+
+        metrics.into_iter().map(|m| { (m.left, m.top, m.width, m.height) }).collect()
     }
 }

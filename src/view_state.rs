@@ -15,6 +15,7 @@ pub struct ViewState {
 
     document: LineGapBuffer<Option<TextLayout>>,
     cursor_pos: usize,
+    selection_pos: usize,
 
     anchor_pos: usize,
     anchor_y: f32,
@@ -43,6 +44,7 @@ impl ViewState {
             dwrite_factory,
             document,
             cursor_pos: 0,
+            selection_pos: 100,
             anchor_pos: 0,
             anchor_y: 0.0,
         }
@@ -391,14 +393,35 @@ impl ViewState {
         origin: D2D1_POINT_2F,
         rt: &ComPtr<ID2D1HwndRenderTarget>,
         brush: &ComPtr<ID2D1Brush>,
+        selection_brush: &ComPtr<ID2D1Brush>,
     ) {
         let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
         let (mut y0, line_no1, line_no2) =
             self.lines_on_screen(anchor_line, anchor_line_y);
+        let selection_start = self.cursor_pos.min(self.selection_pos);
+        let selection_end = self.cursor_pos.max(self.selection_pos);
         for i in line_no1..line_no2 {
             self.ensure_layout(i);
             let line = self.document.get_line(i);
             let layout = line.data.as_ref().unwrap();
+
+            let sel_start = selection_start.max(line.start);
+            let sel_end = selection_end.min(line.end);
+            if sel_start < sel_end {
+                let rs = layout.get_selection_rects(sel_start - line.start, sel_end - line.start);
+                for (left, top, w, h) in rs {
+                    let rect = D2D1_RECT_F {
+                        left: left + origin.x,
+                        top: top + y0 + origin.y,
+                        right: left + w + origin.x,
+                        bottom: top + h + y0 + origin.y,
+                    };
+                    unsafe {
+                        rt.FillRectangle(&rect, selection_brush.as_raw());
+                    }
+                }
+            }
+
             unsafe {
                 rt.DrawTextLayout(
                     D2D1_POINT_2F { x: origin.x, y: origin.y + y0},

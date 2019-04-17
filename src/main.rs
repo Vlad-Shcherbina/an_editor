@@ -133,6 +133,7 @@ impl AppState {
 struct Resources {
     render_target: ComPtr<ID2D1HwndRenderTarget>,
     brush: ComPtr<ID2D1Brush>,
+    sel_brush: ComPtr<ID2D1Brush>,
     text_format: ComPtr<IDWriteTextFormat>,
 }
 
@@ -173,7 +174,14 @@ impl Resources {
             ComPtr::from_raw(render_target)
         };
         let brush = unsafe {
-            let c = D2D1_COLOR_F { r: 1.0, b: 1.0, g: 1.0, a: 1.0 };
+            let c = D2D1_COLOR_F { r: 1.0, g: 1.0, b: 1.0, a: 1.0 };
+            let mut brush = null_mut();
+            let hr = render_target.CreateSolidColorBrush(&c, null(), &mut brush);
+            assert!(hr == S_OK, "0x{:x}", hr);
+            ComPtr::from_raw(brush)
+        };
+        let sel_brush = unsafe {
+            let c = D2D1_COLOR_F { r: 0.3, g: 0.3, b: 0.4, a: 1.0 };
             let mut brush = null_mut();
             let hr = render_target.CreateSolidColorBrush(&c, null(), &mut brush);
             assert!(hr == S_OK, "0x{:x}", hr);
@@ -197,6 +205,7 @@ impl Resources {
         Resources {
             render_target,
             brush: brush.up(),
+            sel_brush: sel_brush.up(),
             text_format,
         }
     }
@@ -217,7 +226,7 @@ fn paint() {
             x: PADDING_LEFT,
             y: 0.0,
         };
-        view_state.render(origin, rt, &resources.brush);
+        view_state.render(origin, rt, &resources.brush, &resources.sel_brush);
 
         let hr = rt.EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
