@@ -54,6 +54,23 @@ impl ViewState {
         self.selection_pos = self.cursor_pos;
     }
 
+    pub fn paste(&mut self, s: &str) {
+        let s: Vec<char> = s.chars().collect();
+        if self.selection_pos != self.cursor_pos {
+            let a = self.cursor_pos.min(self.selection_pos);
+            let b = self.cursor_pos.max(self.selection_pos);
+            self.document.replace_slice(a, b, &s);
+            self.cursor_pos = a + s.len();
+            self.clear_selection();
+            self.ensure_cursor_on_screen();
+            return;
+        }
+        self.document.replace_slice(self.cursor_pos, self.cursor_pos, &s);
+        self.cursor_pos += s.len();
+        self.clear_selection();
+        self.ensure_cursor_on_screen();
+    }
+
     pub fn insert_char(&mut self, c: char) {
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);

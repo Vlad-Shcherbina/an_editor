@@ -1,8 +1,8 @@
 #![allow(non_snake_case)]
 // #![windows_subsystem = "windows"]  // prevent console
 
-use std::ffi::OsStr;
-use std::os::windows::ffi::OsStrExt;
+use std::ffi::{OsStr, OsString};
+use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::mem;
 use std::ptr::{null, null_mut};
 use std::io::Error;
@@ -14,7 +14,9 @@ use winapi::shared::winerror::*;
 use winapi::shared::dxgiformat::*;
 use winapi::shared::windowsx::*;
 use winapi::um::libloaderapi::GetModuleHandleW;
+use winapi::um::winbase::*;
 use winapi::um::winuser::*;
+use winapi::um::errhandlingapi::*;
 use winapi::um::dcommon::*;
 use winapi::um::d2d1::*;
 use winapi::um::dwrite::*;
@@ -234,6 +236,31 @@ fn paint() {
     }
 }
 
+fn get_clipboard(hwnd: HWND) -> String {
+    unsafe {
+        let res = OpenClipboard(hwnd);
+        assert!(res != 0);
+        let h = GetClipboardData(CF_UNICODETEXT);
+        let pdata = GlobalLock(h) as *mut u16;
+        assert!(!pdata.is_null());
+        let mut data = Vec::new();
+        let mut pos = 0;
+        while *pdata.offset(pos) != 0 {
+            data.push(*pdata.offset(pos));
+            pos += 1;
+        }
+        let s = OsString::from_wide(&data);
+        let s = s.into_string().unwrap();
+        let res = GlobalUnlock(pdata as *mut _);
+        if res == 0 {
+            assert!(GetLastError() == NO_ERROR);
+        }
+        let res = CloseClipboard();
+        assert!(res != 0);
+        s.replace("\r\n", "\n")
+    }
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
@@ -341,75 +368,92 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_KEYDOWN => {
             println!("WM_KEYDOWN {}", wParam);
-            let view_state = VIEW_STATE.as_mut().unwrap();
-            let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
-            let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
-            let mut need_redraw = true;
-            let mut regular_movement_cmd = true;
-            match wParam as i32 {
-                VK_BACK => {
-                    view_state.backspace();
-                    regular_movement_cmd = false;
+            (||{
+                let view_state = VIEW_STATE.as_mut().unwrap();
+                let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
+                let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
+
+                if ctrl_pressed {
+                    let scan_code = (lParam >> 16) & 511;
+                    dbg!(scan_code);
+                    match scan_code {
+                        0x2f => { // ctrl-V
+                            let s = get_clipboard(hWnd);
+                            view_state.paste(&s);
+                            InvalidateRect(hWnd, null(), 1);
+                            return;
+                        }
+                        _ => {}
+                    }
                 }
-                VK_DELETE => {
-                    view_state.del();
-                    regular_movement_cmd = false;
+
+                let mut need_redraw = true;
+                let mut regular_movement_cmd = true;
+                match wParam as i32 {
+                    VK_BACK => {
+                        view_state.backspace();
+                        regular_movement_cmd = false;
+                    }
+                    VK_DELETE => {
+                        view_state.del();
+                        regular_movement_cmd = false;
+                    }
+                    VK_LEFT =>
+                        if ctrl_pressed {
+                            view_state.ctrl_left()
+                        } else {
+                            view_state.left()
+                        }
+                    VK_RIGHT =>
+                        if ctrl_pressed {
+                            view_state.ctrl_right()
+                        } else {
+                            view_state.right()
+                        }
+                    VK_HOME =>
+                        if ctrl_pressed {
+                            view_state.ctrl_home()
+                        } else {
+                            view_state.home()
+                        }
+                    VK_END =>
+                        if ctrl_pressed {
+                            view_state.ctrl_end()
+                        } else {
+                            view_state.end()
+                        }
+                    VK_UP =>
+                        if ctrl_pressed {
+                            view_state.scroll(1.0)
+                        } else {
+                            view_state.up()
+                        }
+                    VK_DOWN =>
+                        if ctrl_pressed  {
+                            view_state.scroll(-1.0)
+                        } else {
+                            view_state.down()
+                        }
+                    VK_PRIOR => view_state.pg_up(),
+                    VK_NEXT => view_state.pg_down(),
+                    VK_RETURN => {
+                        view_state.insert_char('\n');
+                        regular_movement_cmd = false;
+                    }
+                    _ => {
+                        need_redraw = false;
+                        regular_movement_cmd = false;
+                    }
+                };
+                if regular_movement_cmd {
+                    if !shift_pressed {
+                        view_state.clear_selection();
+                    }
                 }
-                VK_LEFT =>
-                    if ctrl_pressed {
-                        view_state.ctrl_left()
-                    } else {
-                        view_state.left()
-                    }
-                VK_RIGHT =>
-                    if ctrl_pressed {
-                        view_state.ctrl_right()
-                    } else {
-                        view_state.right()
-                    }
-                VK_HOME =>
-                    if ctrl_pressed {
-                        view_state.ctrl_home()
-                    } else {
-                        view_state.home()
-                    }
-                VK_END =>
-                    if ctrl_pressed {
-                        view_state.ctrl_end()
-                    } else {
-                        view_state.end()
-                    }
-                VK_UP =>
-                    if ctrl_pressed {
-                        view_state.scroll(1.0)
-                    } else {
-                        view_state.up()
-                    }
-                VK_DOWN =>
-                    if ctrl_pressed  {
-                        view_state.scroll(-1.0)
-                    } else {
-                        view_state.down()
-                    }
-                VK_PRIOR => view_state.pg_up(),
-                VK_NEXT => view_state.pg_down(),
-                VK_RETURN => {
-                    view_state.insert_char('\n');
-                    regular_movement_cmd = false;
+                if need_redraw {
+                    InvalidateRect(hWnd, null(), 1);
                 }
-                _ => {
-                    need_redraw = false;
-                    regular_movement_cmd = false;
-                }
-            };
-            if regular_movement_cmd {
-                if !shift_pressed {
-                    view_state.clear_selection();
-                }
-            }
-            if need_redraw {
-                InvalidateRect(hWnd, null(), 1);
-            }
+            })();
             0
         }
         _ => DefWindowProcW(hWnd, msg, wParam, lParam)

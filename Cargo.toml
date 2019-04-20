@@ -6,4 +6,4 @@ edition = "2018"
 
 [dependencies.winapi]
 version = "*"
-features = ["debug", "winuser", "libloaderapi", "d2d1", "windowsx"]
+features = ["debug", "winbase", "winuser", "errhandlingapi", "libloaderapi", "d2d1", "windowsx"]
