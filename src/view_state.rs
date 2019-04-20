@@ -71,6 +71,23 @@ impl ViewState {
         self.ensure_cursor_on_screen();
     }
 
+    pub fn get_selection(&self) -> String {
+        let a = self.cursor_pos.min(self.selection_pos);
+        let b = self.cursor_pos.max(self.selection_pos);
+        self.document.slice_string(a, b)
+    }
+
+    pub fn cut_selection(&mut self) -> String {
+        let a = self.cursor_pos.min(self.selection_pos);
+        let b = self.cursor_pos.max(self.selection_pos);
+        let result = self.document.slice_string(a, b);
+        self.document.replace_slice(a, b, &[]);
+        self.cursor_pos = a;
+        self.clear_selection();
+        self.ensure_cursor_on_screen();
+        result
+    }
+
     pub fn insert_char(&mut self, c: char) {
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);

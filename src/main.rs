@@ -261,6 +261,35 @@ fn get_clipboard(hwnd: HWND) -> String {
     }
 }
 
+fn set_clipboard(hwnd: HWND, s: &str) {
+    let data = win32_string(s);
+    unsafe {
+        let res = OpenClipboard(hwnd);
+        assert!(res != 0);
+        let res = EmptyClipboard();
+        assert!(res != 0);
+
+        let h = GlobalAlloc(GMEM_MOVEABLE, data.len() * 2);
+        assert!(!h.is_null());
+
+        let pdata = GlobalLock(h) as *mut u16;
+        assert!(!pdata.is_null());
+        for (i, c) in data.into_iter().enumerate() {
+            *pdata.offset(i as isize) = c;
+        }
+        let res = GlobalUnlock(pdata as *mut _);
+        if res == 0 {
+            assert!(GetLastError() == NO_ERROR);
+        }
+
+        let res = SetClipboardData(CF_UNICODETEXT, h);
+        assert!(!res.is_null());
+
+        let res = CloseClipboard();
+        assert!(res != 0);
+    }
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
@@ -375,9 +404,19 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
                 if ctrl_pressed {
                     let scan_code = (lParam >> 16) & 511;
-                    dbg!(scan_code);
                     match scan_code {
-                        0x2f => { // ctrl-V
+                        0x2d => {  // ctrl-X
+                            let s = view_state.cut_selection();
+                            set_clipboard(hWnd, &s);
+                            InvalidateRect(hWnd, null(), 1);
+                            return;
+                        }
+                        0x2e => {  // ctrl-C
+                            let s = view_state.get_selection();
+                            set_clipboard(hWnd, &s);
+                            return;
+                        }
+                        0x2f => {  // ctrl-V
                             let s = get_clipboard(hWnd);
                             view_state.paste(&s);
                             InvalidateRect(hWnd, null(), 1);
