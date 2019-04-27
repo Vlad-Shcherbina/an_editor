@@ -517,6 +517,12 @@ fn main() -> Result<(), Error> {
             Some(loc) => format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
             None => "location unknown".to_owned()
         };
+
+        // (anchor:aIMTMDTQfJDYrJxa)
+        let exe = std::env::current_exe().unwrap();
+        let exe_dir = exe.parent().unwrap();
+        std::env::set_current_dir(exe_dir).unwrap();
+
         let bt = backtrace::Backtrace::new();
         let message = format!("panic {:?}, {}\n{:?}", payload, loc, bt);
         println!("{}", message);
@@ -533,6 +539,8 @@ fn main() -> Result<(), Error> {
                 win32_string("an editor error").as_ptr(),
                 MB_OK | MB_ICONERROR);
         }
+
+        std::process::exit(1);
     }));
 
     let _hwnd = create_window("an_editor", "тест")?;

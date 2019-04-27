@@ -10,3 +10,6 @@ backtrace = "*"
 [dependencies.winapi]
 version = "*"
 features = ["debug", "winbase", "winuser", "errhandlingapi", "libloaderapi", "d2d1", "windowsx"]
+
+[profile.release]
+debug = true
