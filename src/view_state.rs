@@ -1,4 +1,5 @@
 use std::ptr::null_mut;
+use std::path::PathBuf;
 
 use winapi::um::dwrite::*;
 use winapi::um::d2d1::*;
@@ -12,6 +13,9 @@ pub struct ViewState {
     height: f32,
     text_format: ComPtr<IDWriteTextFormat>,
     dwrite_factory: ComPtr<IDWriteFactory>,
+
+    filename: Option<PathBuf>,
+    modified: bool,
 
     document: LineGapBuffer<Option<TextLayout>>,
     cursor_pos: usize,
@@ -27,6 +31,7 @@ impl ViewState {
         height: f32,
         text_format: ComPtr<IDWriteTextFormat>,
         dwrite_factory: ComPtr<IDWriteFactory>,
+        filename: Option<PathBuf>,
     ) -> ViewState {
         let text = std::fs::read_to_string("samples/idiot-dostoievskii.txt").unwrap();
         let text = text.replace("\r\n", "\n");
@@ -42,6 +47,8 @@ impl ViewState {
             height,
             text_format,
             dwrite_factory,
+            filename,
+            modified: false,
             document,
             cursor_pos: 0,
             selection_pos: 0,
@@ -50,11 +57,21 @@ impl ViewState {
         }
     }
 
+    pub fn get_title(&self) -> String {
+        let mut s = if self.modified { "* ".to_owned() } else { "".to_owned() };
+        match &self.filename {
+            Some(p) => s.push_str(&p.file_name().unwrap().to_string_lossy()),
+            None => s.push_str("untitled"),
+        };
+        s
+    }
+
     pub fn clear_selection(&mut self) {
         self.selection_pos = self.cursor_pos;
     }
 
     pub fn paste(&mut self, s: &str) {
+        self.modified = true;
         let s: Vec<char> = s.chars().collect();
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);
@@ -78,6 +95,7 @@ impl ViewState {
     }
 
     pub fn cut_selection(&mut self) -> String {
+        self.modified = true;
         let a = self.cursor_pos.min(self.selection_pos);
         let b = self.cursor_pos.max(self.selection_pos);
         let result = self.document.slice_string(a, b);
@@ -89,6 +107,7 @@ impl ViewState {
     }
 
     pub fn insert_char(&mut self, c: char) {
+        self.modified = true;
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
@@ -106,6 +125,7 @@ impl ViewState {
 
     pub fn backspace(&mut self) {
         if self.selection_pos != self.cursor_pos {
+            self.modified = true;
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
             self.document.replace_slice(a, b, &[]);
@@ -115,6 +135,7 @@ impl ViewState {
             return;
         }
         if self.cursor_pos > 0 {
+            self.modified = true;
             self.cursor_pos -=1;
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
@@ -124,6 +145,7 @@ impl ViewState {
 
     pub fn del(&mut self) {
         if self.selection_pos != self.cursor_pos {
+            self.modified = true;
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
             self.document.replace_slice(a, b, &[]);
@@ -133,6 +155,7 @@ impl ViewState {
             return;
         }
         if self.cursor_pos < self.document.len() {
+            self.modified = true;
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
             self.ensure_cursor_on_screen();

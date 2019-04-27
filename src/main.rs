@@ -319,7 +319,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 size.height,
                 resources.text_format.clone(),
                 app_state.dwrite_factory.clone(),
+                None,  // filename
             );
+            let res = SetWindowTextW(
+                app_state.hwnd,
+                win32_string(&view_state.get_title()).as_ptr());
+            assert!(res != 0);
             APP_STATE = Some(app_state);
             RESOURCES = Some(resources);
             VIEW_STATE = Some(view_state);
@@ -392,13 +397,17 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let view_state = VIEW_STATE.as_mut().unwrap();
                 view_state.insert_char(c);
                 InvalidateRect(hWnd, null(), 1);
+                let res = SetWindowTextW(
+                    hWnd,
+                    win32_string(&view_state.get_title()).as_ptr());
+                assert!(res != 0);
             }
             0
         }
         WM_KEYDOWN => {
             println!("WM_KEYDOWN {}", wParam);
+            let view_state = VIEW_STATE.as_mut().unwrap();
             (||{
-                let view_state = VIEW_STATE.as_mut().unwrap();
                 let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
                 let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
 
@@ -493,6 +502,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     InvalidateRect(hWnd, null(), 1);
                 }
             })();
+
+            let res = SetWindowTextW(
+                hWnd,
+                win32_string(&view_state.get_title()).as_ptr());
+            assert!(res != 0);
+
             0
         }
         _ => DefWindowProcW(hWnd, msg, wParam, lParam)
@@ -543,7 +558,7 @@ fn main() -> Result<(), Error> {
         std::process::exit(1);
     }));
 
-    let _hwnd = create_window("an_editor", "тест")?;
+    let _hwnd = create_window("an_editor", "window title")?;
     loop {
         unsafe {
             let mut message: MSG = mem::uninitialized();
