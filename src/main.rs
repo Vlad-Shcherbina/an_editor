@@ -275,7 +275,7 @@ fn set_clipboard(hwnd: HWND, s: &str) {
         let pdata = GlobalLock(h) as *mut u16;
         assert!(!pdata.is_null());
         for (i, c) in data.into_iter().enumerate() {
-            *pdata.offset(i as isize) = c;
+            *pdata.add(i) = c;
         }
         let res = GlobalUnlock(pdata as *mut _);
         if res == 0 {
@@ -418,7 +418,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 &mut scroll_lines as *mut _ as *mut _,
                 0);
             assert!(res != 0);
-            let delta = delta as f32 / 120.0 * scroll_lines as f32;
+            let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
             let view_state = VIEW_STATE.as_mut().unwrap();
             view_state.scroll(delta);
             InvalidateRect(hWnd, null(), 1);
@@ -527,10 +527,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                         regular_movement_cmd = false;
                     }
                 };
-                if regular_movement_cmd {
-                    if !shift_pressed {
-                        view_state.clear_selection();
-                    }
+                if regular_movement_cmd && !shift_pressed {
+                    view_state.clear_selection();
                 }
                 if need_redraw {
                     InvalidateRect(hWnd, null(), 1);

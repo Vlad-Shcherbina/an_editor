@@ -48,7 +48,7 @@ impl ViewState {
             text_format,
             dwrite_factory,
             filename,
-            modified: modified,
+            modified,
             document,
             cursor_pos: 0,
             selection_pos: 0,
