@@ -32,9 +32,9 @@ impl ViewState {
         text_format: ComPtr<IDWriteTextFormat>,
         dwrite_factory: ComPtr<IDWriteFactory>,
         filename: Option<PathBuf>,
+        text: &str,
+        modified: bool,
     ) -> ViewState {
-        let text = std::fs::read_to_string("samples/idiot-dostoievskii.txt").unwrap();
-        let text = text.replace("\r\n", "\n");
         let text: Vec<char> = text.chars().collect();
         let mut document = LineGapBuffer::new();
         document.replace_slice(0, 0, &text);
@@ -48,7 +48,7 @@ impl ViewState {
             text_format,
             dwrite_factory,
             filename,
-            modified: false,
+            modified: modified,
             document,
             cursor_pos: 0,
             selection_pos: 0,

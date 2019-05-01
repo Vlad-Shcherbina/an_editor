@@ -314,12 +314,46 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let app_state = AppState::new(hWnd);
             let resources = Resources::new(&app_state);
             let size = resources.render_target.GetSize();
+
+            let mut initially_modified = false;
+            let (filename, content) = match std::env::args().nth(1) {
+                Some(arg) => {
+                    let path = std::path::PathBuf::from(arg);
+                    match std::fs::read_to_string(&path) {
+                        Ok(mut content) => {
+                            if content.contains('\r') {
+                                MessageBoxW(
+                                    hWnd,
+                                    win32_string("CRLF line breaks were converted to LF").as_ptr(),
+                                    win32_string("an editor").as_ptr(),
+                                    MB_OK | MB_ICONINFORMATION);
+                                content = content.replace('\r', "");
+                                initially_modified = true;
+                            }
+                            (Some(path), content)
+                        }
+                        Err(e) => {
+                            let msg = format!("Can't open {}.\n{}", path.to_string_lossy(), e);
+                            MessageBoxW(
+                                hWnd,
+                                win32_string(&msg).as_ptr(),
+                                win32_string("an editor - error").as_ptr(),
+                                MB_OK | MB_ICONERROR);
+                            (None, String::new())
+                        }
+                    }
+                }
+                None => (None, String::new())
+            };
+
             let view_state = ViewState::new(
                 size.width - PADDING_LEFT,
                 size.height,
                 resources.text_format.clone(),
                 app_state.dwrite_factory.clone(),
-                None,  // filename
+                filename,
+                &content,
+                initially_modified,
             );
             let res = SetWindowTextW(
                 app_state.hwnd,
@@ -551,7 +585,7 @@ fn main() -> Result<(), Error> {
             MessageBoxW(
                 hwnd,
                 win32_string("A programming error has occurred.\nDiagnostic info is in 'error.txt'").as_ptr(),
-                win32_string("an editor error").as_ptr(),
+                win32_string("an editor - error").as_ptr(),
                 MB_OK | MB_ICONERROR);
         }
 
