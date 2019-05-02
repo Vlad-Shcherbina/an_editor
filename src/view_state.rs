@@ -1,5 +1,4 @@
 use std::ptr::null_mut;
-use std::path::PathBuf;
 
 use winapi::um::dwrite::*;
 use winapi::um::d2d1::*;
@@ -14,8 +13,7 @@ pub struct ViewState {
     text_format: ComPtr<IDWriteTextFormat>,
     dwrite_factory: ComPtr<IDWriteFactory>,
 
-    filename: Option<PathBuf>,
-    modified: bool,
+    pub modified: bool,
 
     document: LineGapBuffer<Option<TextLayout>>,
     cursor_pos: usize,
@@ -31,25 +29,14 @@ impl ViewState {
         height: f32,
         text_format: ComPtr<IDWriteTextFormat>,
         dwrite_factory: ComPtr<IDWriteFactory>,
-        filename: Option<PathBuf>,
-        text: &str,
-        modified: bool,
     ) -> ViewState {
-        let text: Vec<char> = text.chars().collect();
-        let mut document = LineGapBuffer::new();
-        document.replace_slice(0, 0, &text);
-
-        // move gap to the beginning to avoid delay on first edit
-        document.replace_slice(0, 0, &[]);
-
         ViewState {
             width,
             height,
             text_format,
             dwrite_factory,
-            filename,
-            modified,
-            document,
+            modified: false,
+            document: LineGapBuffer::new(),
             cursor_pos: 0,
             selection_pos: 0,
             anchor_pos: 0,
@@ -57,13 +44,12 @@ impl ViewState {
         }
     }
 
-    pub fn get_title(&self) -> String {
-        let mut s = if self.modified { "* ".to_owned() } else { "".to_owned() };
-        match &self.filename {
-            Some(p) => s.push_str(&p.file_name().unwrap().to_string_lossy()),
-            None => s.push_str("untitled"),
-        };
-        s
+    pub fn load(&mut self, text: &str) {
+        self.modified = false;
+        let text: Vec<char> = text.chars().collect();
+        self.document.replace_slice(0, self.document.len(), &text);
+        // move gap to the beginning to avoid delay on first edit
+        self.document.replace_slice(0, 0, &[]);
     }
 
     pub fn clear_selection(&mut self) {

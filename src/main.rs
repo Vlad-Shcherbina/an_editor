@@ -6,6 +6,7 @@ use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::mem;
 use std::ptr::{null, null_mut};
 use std::io::Error;
+use std::path::PathBuf;
 
 use winapi::Interface;
 use winapi::shared::minwindef::*;
@@ -94,8 +95,12 @@ fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
 
 struct AppState {
     hwnd: HWND,
-    d2d_factory: ComPtr<ID2D1Factory>,
-    dwrite_factory: ComPtr<IDWriteFactory>,
+
+    resources: Resources,
+    view_state: ViewState,
+
+    filename: Option<PathBuf>,
+    initially_modified: bool,
 }
 
 impl AppState {
@@ -124,11 +129,39 @@ impl AppState {
             assert!(hr == S_OK, "0x{:x}", hr);
             ComPtr::from_raw(dwrite_factory as * mut _)
         };
+
+        let resources = Resources::new(hwnd, &d2d_factory, &dwrite_factory);
+        // At this point the window is not fully created yet and render target
+        // has size 0x0, so we just specify arbitrary size for the view state.
+        // It will be changed right away on WM_SIZE.
+        let width = 50.0;
+        let height = 50.0;
+        let view_state = ViewState::new(
+            width, height,
+            resources.text_format.clone(),
+            dwrite_factory.clone(),
+        );
+
         AppState {
             hwnd,
-            d2d_factory,
-            dwrite_factory,
+            resources,
+            view_state,
+
+            filename: None,
+            initially_modified: false,
         }
+    }
+
+    pub fn get_title(&self) -> String {
+        let mut s = String::new();
+        if self.initially_modified || self.view_state.modified {
+            s.push_str("* ");
+        }
+        match &self.filename {
+            Some(p) => s.push_str(&p.file_name().unwrap().to_string_lossy()),
+            None => s.push_str("untitled"),
+        };
+        s
     }
 }
 
@@ -140,13 +173,12 @@ struct Resources {
 }
 
 impl Resources {
-    fn new(app_state: &AppState) -> Self {
-        println!("Resources::new()");
+    fn new(
+        hwnd: HWND,
+        d2d_factory: &ComPtr<ID2D1Factory>,
+        dwrite_factory: &ComPtr<IDWriteFactory>,
+    ) -> Self {
         let render_target = unsafe {
-            let mut rc: RECT = mem::uninitialized();
-            GetClientRect(app_state.hwnd, &mut rc);
-            println!("client rect {:?}", rc);
-
             let render_properties = D2D1_RENDER_TARGET_PROPERTIES {
                 _type: D2D1_RENDER_TARGET_TYPE_DEFAULT,
                 pixelFormat: D2D1_PIXEL_FORMAT {
@@ -158,8 +190,11 @@ impl Resources {
                 usage: D2D1_RENDER_TARGET_USAGE_NONE,
                 minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
             };
+            let mut rc: RECT = mem::uninitialized();
+            let res = GetClientRect(hwnd, &mut rc);
+            assert!(res != 0);
             let hwnd_render_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
-                hwnd: app_state.hwnd,
+                hwnd,
                 pixelSize: D2D1_SIZE_U {
                     width: (rc.right - rc.left) as u32,
                     height: (rc.bottom - rc.top) as u32,
@@ -167,7 +202,7 @@ impl Resources {
                 presentOptions: D2D1_PRESENT_OPTIONS_NONE,
             };
             let mut render_target = null_mut();
-            let hr = app_state.d2d_factory.CreateHwndRenderTarget(
+            let hr = d2d_factory.CreateHwndRenderTarget(
                 &render_properties,
                 &hwnd_render_properties,
                 &mut render_target,
@@ -191,7 +226,7 @@ impl Resources {
         };
         let text_format = unsafe {
             let mut text_format = null_mut();
-            let hr = app_state.dwrite_factory.CreateTextFormat(
+            let hr = dwrite_factory.CreateTextFormat(
                 win32_string("Arial").as_ptr(),
                 null_mut(),
                 DWRITE_FONT_WEIGHT_REGULAR,
@@ -216,8 +251,9 @@ impl Resources {
 const PADDING_LEFT: f32 = 5.0;
 
 fn paint() {
-    let resources = unsafe { RESOURCES.as_ref().unwrap() };
-    let view_state = unsafe { VIEW_STATE.as_mut().unwrap() };
+    let app_state = unsafe { APP_STATE.as_mut().unwrap() };
+    let resources = &app_state.resources;
+    let view_state = &mut app_state.view_state;
     let rt = &resources.render_target;
     unsafe {
         rt.BeginDraw();
@@ -288,34 +324,16 @@ fn set_clipboard(hwnd: HWND, s: &str) {
         let res = CloseClipboard();
         assert!(res != 0);
     }
+
 }
 
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
     match msg {
-        WM_DESTROY => {
-            println!("WM_DESTROY");
-            drop(APP_STATE.take());
-            drop(RESOURCES.take());
-            drop(VIEW_STATE.take());
-            PostQuitMessage(0);
-            0
-        }
-        WM_PAINT => {
-            println!("WM_PAINT");
-            paint();
-            let ret = ValidateRect(hWnd, null());
-            assert!(ret != 0);
-            0
-        }
         WM_CREATE => {
             println!("WM_CREATE");
-            let app_state = AppState::new(hWnd);
-            let resources = Resources::new(&app_state);
-            let size = resources.render_target.GetSize();
-
-            let mut initially_modified = false;
+            let mut app_state = AppState::new(hWnd);
             let (filename, content) = match std::env::args().nth(1) {
                 Some(arg) => {
                     let path = std::path::PathBuf::from(arg);
@@ -328,7 +346,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                                     win32_string("an editor").as_ptr(),
                                     MB_OK | MB_ICONINFORMATION);
                                 content = content.replace('\r', "");
-                                initially_modified = true;
+                                app_state.initially_modified = true;
                             }
                             (Some(path), content)
                         }
@@ -345,27 +363,35 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 }
                 None => (None, String::new())
             };
-
-            let view_state = ViewState::new(
-                size.width - PADDING_LEFT,
-                size.height,
-                resources.text_format.clone(),
-                app_state.dwrite_factory.clone(),
-                filename,
-                &content,
-                initially_modified,
-            );
+            app_state.filename = filename;
+            app_state.view_state.load(&content);
             let res = SetWindowTextW(
-                app_state.hwnd,
-                win32_string(&view_state.get_title()).as_ptr());
+                hWnd,
+                win32_string(&app_state.get_title()).as_ptr());
             assert!(res != 0);
+
             APP_STATE = Some(app_state);
-            RESOURCES = Some(resources);
-            VIEW_STATE = Some(view_state);
+            0
+        }
+        WM_NCDESTROY => {
+            println!("WM_NCDESTROY");
+            drop(APP_STATE.take());
+            PostQuitMessage(0);
+            0
+        }
+        WM_PAINT => {
+            println!("WM_PAINT");
+            paint();
+            let ret = ValidateRect(hWnd, null());
+            assert!(ret != 0);
             0
         }
         WM_SIZE => {
             println!("WM_SIZE");
+            let app_state = APP_STATE.as_mut().unwrap();
+            let resources = &app_state.resources;
+            let view_state = &mut app_state.view_state;
+
             let render_size = D2D_SIZE_U {
                 width: GET_X_LPARAM(lParam) as u32,
                 height: GET_Y_LPARAM(lParam) as u32,
@@ -374,25 +400,24 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             if render_size.width == 0 && render_size.height == 0 {
                 println!("minimize");
             } else {
-                let resources = RESOURCES.as_ref().unwrap();
                 let hr = resources.render_target.Resize(&render_size);
                 assert!(hr == S_OK, "0x{:x}", hr);
 
                 let size = resources.render_target.GetSize();
-                let view_state = VIEW_STATE.as_mut().unwrap();
                 view_state.resize(size.width - PADDING_LEFT, size.height);
             }
             0
         }
         WM_LBUTTONDOWN => {
             println!("WM_LBUTTONDOWN");
+            let app_state = APP_STATE.as_mut().unwrap();
+
             let x = GET_X_LPARAM(lParam);
             let y = GET_Y_LPARAM(lParam);
-            let view_state = VIEW_STATE.as_mut().unwrap();
-            view_state.click(x as f32 - PADDING_LEFT, y as f32);
+            app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
             let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
             if !shift_pressed {
-                view_state.clear_selection();
+                app_state.view_state.clear_selection();
             }
             InvalidateRect(hWnd, null(), 1);
             0
@@ -402,8 +427,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             if wParam & MK_LBUTTON != 0 {
                 let x = GET_X_LPARAM(lParam);
                 let y = GET_Y_LPARAM(lParam);
-                let view_state = VIEW_STATE.as_mut().unwrap();
-                view_state.click(x as f32 - PADDING_LEFT, y as f32);
+                let app_state = APP_STATE.as_mut().unwrap();
+                app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
                 InvalidateRect(hWnd, null(), 1);
             }
             0
@@ -419,28 +444,31 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 0);
             assert!(res != 0);
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
-            let view_state = VIEW_STATE.as_mut().unwrap();
-            view_state.scroll(delta);
+            let app_state = APP_STATE.as_mut().unwrap();
+            app_state.view_state.scroll(delta);
             InvalidateRect(hWnd, null(), 1);
             0
         }
         WM_CHAR => {
+
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 {
-                let view_state = VIEW_STATE.as_mut().unwrap();
-                view_state.insert_char(c);
+                let app_state = APP_STATE.as_mut().unwrap();
+                app_state.view_state.insert_char(c);
                 InvalidateRect(hWnd, null(), 1);
                 let res = SetWindowTextW(
                     hWnd,
-                    win32_string(&view_state.get_title()).as_ptr());
+                    win32_string(&app_state.get_title()).as_ptr());
                 assert!(res != 0);
             }
             0
         }
         WM_KEYDOWN => {
+            let app_state = APP_STATE.as_mut().unwrap();
+            let view_state = &mut app_state.view_state;
+
             println!("WM_KEYDOWN {}", wParam);
-            let view_state = VIEW_STATE.as_mut().unwrap();
             (||{
                 let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
                 let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
@@ -537,7 +565,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
             let res = SetWindowTextW(
                 hWnd,
-                win32_string(&view_state.get_title()).as_ptr());
+                win32_string(&app_state.get_title()).as_ptr());
             assert!(res != 0);
 
             0
@@ -547,8 +575,6 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 }
 
 static mut APP_STATE: Option<AppState> = None;
-static mut RESOURCES: Option<Resources> = None;
-static mut VIEW_STATE: Option<ViewState> = None;
 
 fn main() -> Result<(), Error> {
     std::panic::set_hook(Box::new(|pi| {
