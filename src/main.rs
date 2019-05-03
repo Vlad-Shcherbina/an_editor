@@ -25,6 +25,7 @@ use winapi::um::d2d1::{
     D2D1_SIZE_U,
     D2D1_POINT_2F,
 };
+use winapi::um::commdlg::*;
 
 mod com_ptr;
 mod text_layout;
@@ -101,6 +102,8 @@ struct AppState {
 
     filename: Option<PathBuf>,
     initially_modified: bool,
+
+    flash: Option<String>,
 }
 
 impl AppState {
@@ -149,6 +152,8 @@ impl AppState {
 
             filename: None,
             initially_modified: false,
+
+            flash: None,
         }
     }
 
@@ -324,7 +329,86 @@ fn set_clipboard(hwnd: HWND, s: &str) {
         let res = CloseClipboard();
         assert!(res != 0);
     }
+}
 
+fn open_dialog(hwnd: HWND) -> Option<PathBuf> {
+    let mut buf: Vec<u16> = vec![0 as u16; 1024];
+    let mut d = OPENFILENAMEW {
+        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
+        hwndOwner: hwnd,
+        hInstance: null_mut(),
+        lpstrFilter: null(),
+        lpstrCustomFilter: null_mut(),
+        nMaxCustFilter: 0,
+        nFilterIndex: 0,
+        lpstrFile: buf.as_mut_ptr(),
+        nMaxFile: buf.len() as u32,
+        lpstrFileTitle: null_mut(),
+        nMaxFileTitle: 0,
+        lpstrInitialDir: null(),
+        lpstrTitle: null(),
+        Flags: 0,
+        nFileOffset: 0,
+        nFileExtension: 0,
+        lpstrDefExt: null(),
+        lCustData: 0,
+        lpfnHook: None,
+        lpTemplateName: null(),
+        pvReserved: null_mut(),
+        dwReserved: 0,
+        FlagsEx: 0,
+    };
+    let opened = unsafe {
+        let res = GetOpenFileNameW(&mut d);
+        if res != 0 {
+            true
+        } else {
+            let e = CommDlgExtendedError();
+            assert!(e == 0, "{}", e);
+            false
+        }
+    };
+    if opened {
+        let mut pos = 0;
+        while buf[pos] != 0 {
+            pos += 1;
+        }
+        Some(OsString::from_wide(&buf[..pos]).into())
+    } else {
+        None
+    }
+}
+
+fn load_document(app_state: &mut AppState, path: PathBuf) {
+    match std::fs::read_to_string(&path) {
+        Ok(mut content) => {
+            if content.contains('\r') {
+                content = content.replace('\r', "");
+                app_state.initially_modified = true;
+                assert!(app_state.flash.is_none());
+                app_state.flash = Some(
+                    "CRLF line breaks were converted to LF".to_owned());
+            }
+            app_state.filename = Some(path);
+            app_state.view_state.load(&content);
+            unsafe {
+                let res = SetWindowTextW(
+                    app_state.hwnd,
+                    win32_string(&app_state.get_title()).as_ptr());
+                assert!(res != 0);
+            }
+        }
+        Err(e) => {
+            let msg = format!("Can't open {}.\n{}", path.to_string_lossy(), e);
+            unsafe {
+                MessageBoxW(
+                    app_state.hwnd,
+                    win32_string(&msg).as_ptr(),
+                    win32_string("an editor - error").as_ptr(),
+                    MB_OK | MB_ICONERROR);
+            }
+        }
+    }
 }
 
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
@@ -334,42 +418,10 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_CREATE => {
             println!("WM_CREATE");
             let mut app_state = AppState::new(hWnd);
-            let (filename, content) = match std::env::args().nth(1) {
-                Some(arg) => {
-                    let path = std::path::PathBuf::from(arg);
-                    match std::fs::read_to_string(&path) {
-                        Ok(mut content) => {
-                            if content.contains('\r') {
-                                MessageBoxW(
-                                    hWnd,
-                                    win32_string("CRLF line breaks were converted to LF").as_ptr(),
-                                    win32_string("an editor").as_ptr(),
-                                    MB_OK | MB_ICONINFORMATION);
-                                content = content.replace('\r', "");
-                                app_state.initially_modified = true;
-                            }
-                            (Some(path), content)
-                        }
-                        Err(e) => {
-                            let msg = format!("Can't open {}.\n{}", path.to_string_lossy(), e);
-                            MessageBoxW(
-                                hWnd,
-                                win32_string(&msg).as_ptr(),
-                                win32_string("an editor - error").as_ptr(),
-                                MB_OK | MB_ICONERROR);
-                            (None, String::new())
-                        }
-                    }
-                }
-                None => (None, String::new())
-            };
-            app_state.filename = filename;
-            app_state.view_state.load(&content);
-            let res = SetWindowTextW(
-                hWnd,
-                win32_string(&app_state.get_title()).as_ptr());
-            assert!(res != 0);
-
+            match std::env::args().nth(1) {
+                Some(path) => load_document(&mut app_state, PathBuf::from(path)),
+                None => {}
+            }
             APP_STATE = Some(app_state);
             0
         }
@@ -384,6 +436,20 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             paint();
             let ret = ValidateRect(hWnd, null());
             assert!(ret != 0);
+
+            let app_state = APP_STATE.as_mut().unwrap();
+            match app_state.flash.take() {
+                Some(s) => {
+                    println!("flash");
+                    MessageBoxW(
+                        hWnd,
+                        win32_string(&s).as_ptr(),
+                        win32_string("an editor").as_ptr(),
+                        MB_OK | MB_ICONINFORMATION);
+                }
+                None => {}
+            }
+
             0
         }
         WM_SIZE => {
@@ -450,7 +516,6 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_CHAR => {
-
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 {
@@ -465,17 +530,30 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_KEYDOWN => {
-            let app_state = APP_STATE.as_mut().unwrap();
-            let view_state = &mut app_state.view_state;
-
             println!("WM_KEYDOWN {}", wParam);
             (||{
+                let app_state = APP_STATE.as_mut().unwrap();
+                let view_state = &mut app_state.view_state;
+
                 let ctrl_pressed = GetKeyState(VK_CONTROL) as u16 & 0x8000 != 0;
                 let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
 
                 if ctrl_pressed {
                     let scan_code = (lParam >> 16) & 511;
+                    dbg!(scan_code);
                     match scan_code {
+                        0x18 |     // ctrl-O (Qwerty)
+                        0x27 => {  // ctrl-O (Colemak)
+                            // TODO: save unsaved
+                            match open_dialog(hWnd) {
+                                Some(path) => {
+                                    load_document(app_state, path);
+                                    InvalidateRect(hWnd, null(), 1);
+                                }
+                                None => {}
+                            }
+                            return;
+                        }
                         0x2d => {  // ctrl-X
                             let s = view_state.cut_selection();
                             set_clipboard(hWnd, &s);
@@ -563,6 +641,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 }
             })();
 
+            let app_state = APP_STATE.as_mut().unwrap();
             let res = SetWindowTextW(
                 hWnd,
                 win32_string(&app_state.get_title()).as_ptr());

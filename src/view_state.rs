@@ -50,6 +50,10 @@ impl ViewState {
         self.document.replace_slice(0, self.document.len(), &text);
         // move gap to the beginning to avoid delay on first edit
         self.document.replace_slice(0, 0, &[]);
+        self.cursor_pos = 0;
+        self.selection_pos = 0;
+        self.anchor_pos = 0;
+        self.anchor_y = 0.0;
     }
 
     pub fn clear_selection(&mut self) {
