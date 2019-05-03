@@ -56,6 +56,10 @@ impl ViewState {
         self.anchor_y = 0.0;
     }
 
+    pub fn content(&self) -> String {
+        self.document.slice_string(0, self.document.len())
+    }
+
     pub fn clear_selection(&mut self) {
         self.selection_pos = self.cursor_pos;
     }

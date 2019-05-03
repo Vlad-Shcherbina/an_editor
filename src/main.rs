@@ -331,7 +331,12 @@ fn set_clipboard(hwnd: HWND, s: &str) {
     }
 }
 
-fn open_dialog(hwnd: HWND) -> Option<PathBuf> {
+enum FileDialogType {
+    Open,
+    SaveAs,
+}
+
+fn file_dialog(hwnd: HWND, tp: FileDialogType) -> Option<PathBuf> {
     let mut buf: Vec<u16> = vec![0 as u16; 1024];
     let mut d = OPENFILENAMEW {
         lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
@@ -359,7 +364,10 @@ fn open_dialog(hwnd: HWND) -> Option<PathBuf> {
         FlagsEx: 0,
     };
     let opened = unsafe {
-        let res = GetOpenFileNameW(&mut d);
+        let res = match tp {
+            FileDialogType::Open => GetOpenFileNameW(&mut d),
+            FileDialogType::SaveAs => GetSaveFileNameW(&mut d),
+        };
         if res != 0 {
             true
         } else {
@@ -407,6 +415,35 @@ fn load_document(app_state: &mut AppState, path: PathBuf) {
                     win32_string("an editor - error").as_ptr(),
                     MB_OK | MB_ICONERROR);
             }
+        }
+    }
+}
+
+fn save_document(app_state: &mut AppState, path: PathBuf) -> bool {
+    let content: String = app_state.view_state.content();
+    match std::fs::write(&path, content) {
+        Ok(()) => {
+            app_state.filename = Some(path);
+            app_state.initially_modified = false;
+            app_state.view_state.modified = false;
+            unsafe {
+                let res = SetWindowTextW(
+                    app_state.hwnd,
+                    win32_string(&app_state.get_title()).as_ptr());
+                assert!(res != 0);
+            }
+            true
+        },
+        Err(e) => {
+            let msg = format!("Can't write to {}.\n{}", path.to_string_lossy(), e);
+            unsafe {
+                MessageBoxW(
+                    app_state.hwnd,
+                    win32_string(&msg).as_ptr(),
+                    win32_string("an editor - error").as_ptr(),
+                    MB_OK | MB_ICONERROR);
+            }
+            false
         }
     }
 }
@@ -540,17 +577,47 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
                 if ctrl_pressed {
                     let scan_code = (lParam >> 16) & 511;
-                    dbg!(scan_code);
                     match scan_code {
                         0x18 |     // ctrl-O (Qwerty)
                         0x27 => {  // ctrl-O (Colemak)
-                            // TODO: save unsaved
-                            match open_dialog(hWnd) {
-                                Some(path) => {
+                            if app_state.initially_modified || app_state.view_state.modified {
+                                let res = MessageBoxW(
+                                    app_state.hwnd,
+                                    win32_string("Do you want to save changes to the current document?").as_ptr(),
+                                    win32_string("an editor - unsaved changes").as_ptr(),
+                                    MB_YESNOCANCEL | MB_ICONWARNING);
+                                match res {
+                                    IDYES => {
+                                        match &app_state.filename {
+                                            Some(path) => {
+                                                if save_document(app_state, path.clone()) {
+                                                    if let Some(path) = file_dialog(hWnd, FileDialogType::Open) {
+                                                        load_document(app_state, path);
+                                                        InvalidateRect(hWnd, null(), 1);
+                                                    }
+                                                }
+                                            }
+                                            None => {
+                                                if let Some(path) = file_dialog(hWnd, FileDialogType::SaveAs) {
+                                                    save_document(app_state, path);
+                                                }
+                                            }
+                                        }
+                                    }
+                                    IDNO => {
+                                        if let Some(path) = file_dialog(hWnd, FileDialogType::Open) {
+                                            load_document(app_state, path);
+                                            InvalidateRect(hWnd, null(), 1);
+                                        }
+                                    }
+                                    IDCANCEL => {}
+                                    _ => panic!("{}", res),
+                                }
+                            } else {
+                                if let Some(path) = file_dialog(hWnd, FileDialogType::Open) {
                                     load_document(app_state, path);
                                     InvalidateRect(hWnd, null(), 1);
                                 }
-                                None => {}
                             }
                             return;
                         }
