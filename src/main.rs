@@ -494,7 +494,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let mut app_state = AppState::new(hWnd);
             match std::env::args().nth(1) {
                 Some(path) => load_document(&mut app_state, PathBuf::from(path)),
-                None => {}
+                None => {
+                    let res = SetWindowTextW(
+                        app_state.hwnd,
+                        win32_string(&app_state.get_title()).as_ptr());
+                    assert!(res != 0);
+                }
             }
             APP_STATE = Some(app_state);
             0
