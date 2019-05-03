@@ -19,8 +19,12 @@ pub struct ViewState {
     cursor_pos: usize,
     selection_pos: usize,
 
+    // for screen positioning relative to the document
     anchor_pos: usize,
     anchor_y: f32,
+
+    // for vertical navigation using up, down, pgup, pgdown
+    anchor_x: f32,
 }
 
 impl ViewState {
@@ -41,6 +45,7 @@ impl ViewState {
             selection_pos: 0,
             anchor_pos: 0,
             anchor_y: 0.0,
+            anchor_x: 0.0,
         }
     }
 
@@ -54,6 +59,7 @@ impl ViewState {
         self.selection_pos = 0;
         self.anchor_pos = 0;
         self.anchor_y = 0.0;
+        self.anchor_x = 0.0;
     }
 
     pub fn content(&self) -> String {
@@ -97,6 +103,7 @@ impl ViewState {
         self.cursor_pos = a;
         self.clear_selection();
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
         result
     }
 
@@ -109,12 +116,14 @@ impl ViewState {
             self.cursor_pos = a + 1;
             self.clear_selection();
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
             return;
         }
         self.document.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
         self.cursor_pos += 1;
         self.clear_selection();
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn backspace(&mut self) {
@@ -126,6 +135,7 @@ impl ViewState {
             self.cursor_pos = a;
             self.clear_selection();
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
             return;
         }
         if self.cursor_pos > 0 {
@@ -134,6 +144,7 @@ impl ViewState {
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
         }
     }
 
@@ -146,6 +157,7 @@ impl ViewState {
             self.cursor_pos = a;
             self.clear_selection();
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
             return;
         }
         if self.cursor_pos < self.document.len() {
@@ -153,6 +165,7 @@ impl ViewState {
             self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
         }
     }
 
@@ -160,6 +173,7 @@ impl ViewState {
         if self.cursor_pos > 0 {
             self.cursor_pos -= 1;
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
         }
     }
 
@@ -167,6 +181,7 @@ impl ViewState {
         if self.cursor_pos < self.document.len() {
             self.cursor_pos += 1;
             self.ensure_cursor_on_screen();
+            self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
         }
     }
 
@@ -182,6 +197,7 @@ impl ViewState {
             self.cursor_pos -= 1;
         }
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn ctrl_right(&mut self) {
@@ -196,6 +212,7 @@ impl ViewState {
             }
         }
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn home(&mut self) {
@@ -209,6 +226,7 @@ impl ViewState {
             .last()
             .unwrap_or(0);
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn end(&mut self) {
@@ -222,39 +240,42 @@ impl ViewState {
             .find(|&x| x > self.cursor_pos - line.start)
             .unwrap_or(end);
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn ctrl_home(&mut self) {
         self.cursor_pos = 0;
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn ctrl_end(&mut self) {
         self.cursor_pos = self.document.len();
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     pub fn up(&mut self) {
-        let (x, y) = self.pos_to_coord(self.cursor_pos);
+        let (_x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line above has different height?
-        self.cursor_pos = self.coord_to_pos(x, y - layout.line_height * 0.5);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, y - layout.line_height * 0.5);
         self.ensure_cursor_on_screen();
     }
 
     pub fn down(&mut self) {
-        let (x, y) = self.pos_to_coord(self.cursor_pos);
+        let (_x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if line below has different height?
-        self.cursor_pos = self.coord_to_pos(x, y + layout.line_height * 1.5);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, y + layout.line_height * 1.5);
         self.ensure_cursor_on_screen();
     }
 
@@ -269,26 +290,28 @@ impl ViewState {
     }
 
     pub fn pg_up(&mut self) {
-        let (x, y) = self.pos_to_coord(self.cursor_pos);
+        let (_x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if lines has different heights?
-        self.cursor_pos = self.coord_to_pos(x, y + layout.line_height * 1.5 - self.height);
+        self.cursor_pos = self.coord_to_pos(
+            self.anchor_x, y + layout.line_height * 1.5 - self.height);
         self.ensure_cursor_on_screen();
     }
 
     pub fn pg_down(&mut self) {
-        let (x, y) = self.pos_to_coord(self.cursor_pos);
+        let (_x, y) = self.pos_to_coord(self.cursor_pos);
 
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
         let layout = line.data.as_ref().unwrap();
         // TODO: what if lines has different heights?
-        self.cursor_pos = self.coord_to_pos(x, y - layout.line_height * 0.5 + self.height);
+        self.cursor_pos = self.coord_to_pos(
+            self.anchor_x, y - layout.line_height * 0.5 + self.height);
         self.ensure_cursor_on_screen();
     }
 
@@ -387,6 +410,7 @@ impl ViewState {
     pub fn click(&mut self, x: f32, y: f32) {
         self.cursor_pos = self.coord_to_pos(x, y);
         self.ensure_cursor_on_screen();
+        self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
     fn pos_to_coord(&mut self, pos: usize) -> (f32, f32) {
