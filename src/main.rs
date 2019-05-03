@@ -579,12 +579,15 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 app_state.view_state.clear_selection();
             }
             InvalidateRect(hWnd, null(), 1);
+            SetCapture(hWnd);
             0
         }
         WM_LBUTTONUP => {
             println!("WM_LBUTTONUP");
             let app_state = APP_STATE.as_mut().unwrap();
             app_state.left_button_pressed = false;
+            let res = ReleaseCapture();
+            assert!(res != 0);
             0
         }
         WM_MOUSEMOVE => {
