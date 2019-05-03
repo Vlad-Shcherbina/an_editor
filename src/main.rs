@@ -448,6 +448,43 @@ fn save_document(app_state: &mut AppState, path: PathBuf) -> bool {
     }
 }
 
+// Returns true if it's ok to proceed
+// (that is, the changes were saved or the user chose to abandon them).
+fn prompt_about_unsaved_changes(app_state: &mut AppState) -> bool {
+    let res = unsafe {
+        MessageBoxW(
+            app_state.hwnd,
+            win32_string("Do you want to save changes to the current document?").as_ptr(),
+            win32_string("an editor - unsaved changes").as_ptr(),
+            MB_YESNOCANCEL | MB_ICONWARNING)
+    };
+    match res {
+        IDYES => {
+            match &app_state.filename {
+                Some(path) => {
+                    if save_document(app_state, path.clone()) {
+                        return true;
+                    }
+                }
+                None => {
+                    if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
+                        save_document(app_state, path);
+                        // Intentionally not returning true after
+                        // "saving as" untitled document,
+                        // to avoid chaining modals.
+                    }
+                }
+            }
+        }
+        IDNO => {
+            return true;
+        }
+        IDCANCEL => {}
+        _ => panic!("{}", res),
+    }
+    false
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
@@ -466,6 +503,15 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_NCDESTROY");
             drop(APP_STATE.take());
             PostQuitMessage(0);
+            0
+        }
+        WM_CLOSE => {
+            let app_state = APP_STATE.as_mut().unwrap();
+            println!("WM_CLOSE");
+            if !(app_state.initially_modified || app_state.view_state.modified) ||
+               prompt_about_unsaved_changes(app_state) {
+                DestroyWindow(hWnd);
+            }
             0
         }
         WM_PAINT => {
@@ -580,40 +626,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     match scan_code {
                         0x18 |     // ctrl-O (Qwerty)
                         0x27 => {  // ctrl-O (Colemak)
-                            if app_state.initially_modified || app_state.view_state.modified {
-                                let res = MessageBoxW(
-                                    app_state.hwnd,
-                                    win32_string("Do you want to save changes to the current document?").as_ptr(),
-                                    win32_string("an editor - unsaved changes").as_ptr(),
-                                    MB_YESNOCANCEL | MB_ICONWARNING);
-                                match res {
-                                    IDYES => {
-                                        match &app_state.filename {
-                                            Some(path) => {
-                                                if save_document(app_state, path.clone()) {
-                                                    if let Some(path) = file_dialog(hWnd, FileDialogType::Open) {
-                                                        load_document(app_state, path);
-                                                        InvalidateRect(hWnd, null(), 1);
-                                                    }
-                                                }
-                                            }
-                                            None => {
-                                                if let Some(path) = file_dialog(hWnd, FileDialogType::SaveAs) {
-                                                    save_document(app_state, path);
-                                                }
-                                            }
-                                        }
-                                    }
-                                    IDNO => {
-                                        if let Some(path) = file_dialog(hWnd, FileDialogType::Open) {
-                                            load_document(app_state, path);
-                                            InvalidateRect(hWnd, null(), 1);
-                                        }
-                                    }
-                                    IDCANCEL => {}
-                                    _ => panic!("{}", res),
-                                }
-                            } else {
+                            if !(app_state.initially_modified || app_state.view_state.modified) ||
+                                prompt_about_unsaved_changes(app_state) {
                                 if let Some(path) = file_dialog(hWnd, FileDialogType::Open) {
                                     load_document(app_state, path);
                                     InvalidateRect(hWnd, null(), 1);
