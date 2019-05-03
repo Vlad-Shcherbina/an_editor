@@ -499,7 +499,7 @@ impl ViewState {
             let layout = line.data.as_ref().unwrap();
 
             let sel_start = selection_start.max(line.start);
-            let sel_end = selection_end.min(line.end);
+            let sel_end = selection_end.min(line.end + 1);
             if sel_start < sel_end {
                 let rs = layout.get_selection_rects(sel_start - line.start, sel_end - line.start);
                 for (left, top, w, h) in rs {

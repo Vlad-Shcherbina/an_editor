@@ -11,6 +11,7 @@ pub struct TextLayout {
     pub height: f32,
     pub line_height: f32,
     line_metrics: Vec<DWRITE_LINE_METRICS>,
+    len: usize,
 }
 
 impl TextLayout {
@@ -80,6 +81,7 @@ impl TextLayout {
             height: text_metrics.height,
             line_height: ht_metrics.height,
             line_metrics,
+            len: text.len() - 1,
         }
     }
 
@@ -138,7 +140,7 @@ impl TextLayout {
     }
 
     pub fn get_selection_rects(&self, start_pos: usize, end_pos: usize) -> Vec<(f32, f32, f32, f32)> {
-        assert!(start_pos <= end_pos);
+        assert!(start_pos <= end_pos && end_pos <= self.len + 1);
         let mut metrics = vec![unsafe { std::mem::zeroed() }; self.line_metrics.len()];
         let mut actual_count = 0;
         let hr = unsafe {
@@ -155,6 +157,10 @@ impl TextLayout {
         assert!(hr == S_OK, "0x{:x}", hr);
         metrics.truncate(actual_count as usize);
 
-        metrics.into_iter().map(|m| { (m.left, m.top, m.width, m.height) }).collect()
+        let mut result: Vec<_> = metrics.into_iter().map(|m| { (m.left, m.top, m.width, m.height) }).collect();
+        if end_pos == self.len + 1 {
+            result.last_mut().unwrap().2 += self.line_height * 0.5;
+        }
+        result
     }
 }
