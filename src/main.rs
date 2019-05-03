@@ -104,6 +104,8 @@ struct AppState {
     initially_modified: bool,
 
     flash: Option<String>,
+
+    left_button_pressed: bool,
 }
 
 impl AppState {
@@ -154,6 +156,8 @@ impl AppState {
             initially_modified: false,
 
             flash: None,
+
+            left_button_pressed: false,
         }
     }
 
@@ -566,6 +570,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_LBUTTONDOWN");
             let app_state = APP_STATE.as_mut().unwrap();
 
+            app_state.left_button_pressed = true;
             let x = GET_X_LPARAM(lParam);
             let y = GET_Y_LPARAM(lParam);
             app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
@@ -576,12 +581,18 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             InvalidateRect(hWnd, null(), 1);
             0
         }
+        WM_LBUTTONUP => {
+            println!("WM_LBUTTONUP");
+            let app_state = APP_STATE.as_mut().unwrap();
+            app_state.left_button_pressed = false;
+            0
+        }
         WM_MOUSEMOVE => {
             println!("WM_MOUSEMOVE");
-            if wParam & MK_LBUTTON != 0 {
+            let app_state = APP_STATE.as_mut().unwrap();
+            if app_state.left_button_pressed {
                 let x = GET_X_LPARAM(lParam);
                 let y = GET_Y_LPARAM(lParam);
-                let app_state = APP_STATE.as_mut().unwrap();
                 app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
                 InvalidateRect(hWnd, null(), 1);
             }
