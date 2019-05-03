@@ -606,7 +606,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_CHAR => {
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
-            if wParam >= 32 {
+            if wParam >= 32 || wParam == 9 /* tab */ {
                 let app_state = APP_STATE.as_mut().unwrap();
                 app_state.view_state.insert_char(c);
                 InvalidateRect(hWnd, null(), 1);
