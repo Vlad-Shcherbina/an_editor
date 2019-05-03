@@ -714,12 +714,14 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                         }
                     VK_UP =>
                         if ctrl_pressed {
+                            regular_movement_cmd = false;
                             view_state.scroll(1.0)
                         } else {
                             view_state.up()
                         }
                     VK_DOWN =>
                         if ctrl_pressed  {
+                            regular_movement_cmd = false;
                             view_state.scroll(-1.0)
                         } else {
                             view_state.down()
