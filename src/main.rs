@@ -624,6 +624,22 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 if ctrl_pressed {
                     let scan_code = (lParam >> 16) & 511;
                     match scan_code {
+                        0x1f |     // ctrl-S (Qwerty)
+                        0x20 => {  // ctrl-S (Colemak)
+                            match &app_state.filename {
+                                Some(path) => {
+                                    if app_state.initially_modified || app_state.view_state.modified {
+                                        save_document(app_state, path.clone());
+                                    }
+                                }
+                                None => {
+                                    if let Some(path) = file_dialog(hWnd, FileDialogType::SaveAs) {
+                                        save_document(app_state, path);
+                                    }
+                                }
+                            }
+                            return;
+                        }
                         0x18 |     // ctrl-O (Qwerty)
                         0x27 => {  // ctrl-O (Colemak)
                             if !(app_state.initially_modified || app_state.view_state.modified) ||
