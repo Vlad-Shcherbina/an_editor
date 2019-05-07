@@ -591,7 +591,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_MOUSEMOVE => {
-            println!("WM_MOUSEMOVE");
+            // println!("WM_MOUSEMOVE");
             let app_state = APP_STATE.as_mut().unwrap();
             if app_state.left_button_pressed {
                 let x = GET_X_LPARAM(lParam);
@@ -622,6 +622,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 || wParam == 9 /* tab */ {
                 let app_state = APP_STATE.as_mut().unwrap();
+                app_state.view_state.make_undo_snapshot();
                 app_state.view_state.insert_char(c);
                 InvalidateRect(hWnd, null(), 1);
                 let res = SetWindowTextW(
@@ -670,6 +671,17 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                             }
                             return;
                         }
+
+                        0x15 => {  // ctrl-Y (Qwerty)
+                            view_state.redo();
+                            InvalidateRect(hWnd, null(), 1);
+                        }
+                        0x2c => {  // ctrl-Z
+                            view_state.undo();
+                            InvalidateRect(hWnd, null(), 1);
+                            return;
+                        }
+
                         0x2d => {  // ctrl-X
                             let s = view_state.cut_selection();
                             set_clipboard(hWnd, &s);
@@ -695,10 +707,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let mut regular_movement_cmd = true;
                 match wParam as i32 {
                     VK_BACK => {
+                        view_state.make_undo_snapshot();
                         view_state.backspace();
                         regular_movement_cmd = false;
                     }
                     VK_DELETE => {
+                        view_state.make_undo_snapshot();
                         view_state.del();
                         regular_movement_cmd = false;
                     }

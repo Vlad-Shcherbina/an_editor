@@ -7,6 +7,19 @@ use super::com_ptr::ComPtr;
 use super::text_layout::TextLayout;
 use super::line_gap_buffer::{Line, LineGapBuffer};
 
+#[derive(Debug)]
+struct SliceEdit {
+    old_text: String,
+    start: usize,
+    end: usize,
+}
+
+#[derive(Debug)]
+struct UndoSnapshot {
+    slice_edit_count: usize,
+    cursor_pos: usize,
+}
+
 pub struct ViewState {
     width: f32,
     height: f32,
@@ -25,6 +38,11 @@ pub struct ViewState {
 
     // for vertical navigation using up, down, pgup, pgdown
     anchor_x: f32,
+
+    undo_slice_edits: Vec<SliceEdit>,
+    undo_snapshots: Vec<UndoSnapshot>,
+    redo_slice_edits: Vec<SliceEdit>,
+    redo_snapshots: Vec<UndoSnapshot>,
 }
 
 impl ViewState {
@@ -46,13 +64,75 @@ impl ViewState {
             anchor_pos: 0,
             anchor_y: 0.0,
             anchor_x: 0.0,
+            undo_slice_edits: Vec::new(),
+            undo_snapshots: Vec::new(),
+            redo_slice_edits: Vec::new(),
+            redo_snapshots: Vec::new(),
         }
+    }
+
+    fn replace_slice_and_get_edit(&mut self, start: usize, end: usize, text: &[char]) -> Option<SliceEdit> {
+        if self.document.slice_string(start, end).chars().eq(text.iter().cloned()) {
+            return None;
+        }
+        let result = SliceEdit {
+            start,
+            end: start + text.len(),
+            old_text: self.document.slice_string(start, end),
+        };
+        self.document.replace_slice(start, end, text);
+        Some(result)
+    }
+
+    fn replace_slice(&mut self, start: usize, end: usize, text: &[char]) {
+        let u = self.replace_slice_and_get_edit(start, end, text);
+        self.undo_slice_edits.extend(u.into_iter());
+    }
+
+    pub fn make_undo_snapshot(&mut self) {
+        if let Some(&UndoSnapshot { slice_edit_count, cursor_pos }) = self.undo_snapshots.last() {
+            if cursor_pos == self.cursor_pos && slice_edit_count == self.undo_slice_edits.len() {
+                return;
+            }
+        }
+        self.undo_snapshots.push(UndoSnapshot {
+            slice_edit_count: self.undo_slice_edits.len(),
+            cursor_pos: self.cursor_pos,
+        });
+        self.redo_snapshots.clear();
+        self.redo_slice_edits.clear();
+    }
+
+    pub fn undo(&mut self) {
+        if let Some(UndoSnapshot { slice_edit_count, cursor_pos }) = self.undo_snapshots.pop() {
+            self.redo_snapshots.push(UndoSnapshot {
+                slice_edit_count: self.redo_slice_edits.len(),
+                cursor_pos: self.cursor_pos,
+            });
+            while self.undo_slice_edits.len() > slice_edit_count {
+                let SliceEdit { start, end, old_text} = self.undo_slice_edits.pop().unwrap();
+                let old_text: Vec<char> = old_text.chars().collect();
+                let re = self.replace_slice_and_get_edit(start, end, &old_text);
+                self.redo_slice_edits.extend(re.into_iter());
+            }
+            self.cursor_pos = cursor_pos;
+            self.clear_selection();
+        }
+        self.ensure_cursor_on_screen();
+    }
+
+    pub fn redo(&mut self) {
+        std::mem::swap(&mut self.undo_snapshots, &mut self.redo_snapshots);
+        std::mem::swap(&mut self.undo_slice_edits, &mut self.redo_slice_edits);
+        self.undo();
+        std::mem::swap(&mut self.undo_snapshots, &mut self.redo_snapshots);
+        std::mem::swap(&mut self.undo_slice_edits, &mut self.redo_slice_edits);
     }
 
     pub fn load(&mut self, text: &str) {
         self.modified = false;
         let text: Vec<char> = text.chars().collect();
-        self.document.replace_slice(0, self.document.len(), &text);
+        self.replace_slice(0, self.document.len(), &text);
         // move gap to the beginning to avoid delay on first edit
         self.document.replace_slice(0, 0, &[]);
         self.cursor_pos = 0;
@@ -76,13 +156,13 @@ impl ViewState {
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
-            self.document.replace_slice(a, b, &s);
+            self.replace_slice(a, b, &s);
             self.cursor_pos = a + s.len();
             self.clear_selection();
             self.ensure_cursor_on_screen();
             return;
         }
-        self.document.replace_slice(self.cursor_pos, self.cursor_pos, &s);
+        self.replace_slice(self.cursor_pos, self.cursor_pos, &s);
         self.cursor_pos += s.len();
         self.clear_selection();
         self.ensure_cursor_on_screen();
@@ -99,7 +179,7 @@ impl ViewState {
         let a = self.cursor_pos.min(self.selection_pos);
         let b = self.cursor_pos.max(self.selection_pos);
         let result = self.document.slice_string(a, b);
-        self.document.replace_slice(a, b, &[]);
+        self.replace_slice(a, b, &[]);
         self.cursor_pos = a;
         self.clear_selection();
         self.ensure_cursor_on_screen();
@@ -112,14 +192,14 @@ impl ViewState {
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
-            self.document.replace_slice(a, b, &[c]);
+            self.replace_slice(a, b, &[c]);
             self.cursor_pos = a + 1;
             self.clear_selection();
             self.ensure_cursor_on_screen();
             self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
             return;
         }
-        self.document.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
+        self.replace_slice(self.cursor_pos, self.cursor_pos, &[c]);
         self.cursor_pos += 1;
         self.clear_selection();
         self.ensure_cursor_on_screen();
@@ -131,7 +211,7 @@ impl ViewState {
             self.modified = true;
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
-            self.document.replace_slice(a, b, &[]);
+            self.replace_slice(a, b, &[]);
             self.cursor_pos = a;
             self.clear_selection();
             self.ensure_cursor_on_screen();
@@ -141,7 +221,7 @@ impl ViewState {
         if self.cursor_pos > 0 {
             self.modified = true;
             self.cursor_pos -=1;
-            self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
+            self.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
             self.ensure_cursor_on_screen();
             self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
@@ -153,7 +233,7 @@ impl ViewState {
             self.modified = true;
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
-            self.document.replace_slice(a, b, &[]);
+            self.replace_slice(a, b, &[]);
             self.cursor_pos = a;
             self.clear_selection();
             self.ensure_cursor_on_screen();
@@ -162,7 +242,7 @@ impl ViewState {
         }
         if self.cursor_pos < self.document.len() {
             self.modified = true;
-            self.document.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
+            self.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
             self.ensure_cursor_on_screen();
             self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
