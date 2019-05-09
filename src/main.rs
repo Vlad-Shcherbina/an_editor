@@ -507,176 +507,175 @@ fn prompt_about_unsaved_changes(app_state: &mut AppState) -> bool {
 }
 
 fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
-    (||{
-        let view_state = &mut app_state.view_state;
+    let view_state = &mut app_state.view_state;
 
-        let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
-        let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
+    let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
+    let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
 
-        if ctrl_pressed {
-            match scan_code {
-                0x1f |     // ctrl-S (Qwerty)
-                0x20 => {  // ctrl-S (Colemak)
-                    match &app_state.filename {
-                        Some(path) => {
-                            if app_state.initially_modified || app_state.view_state.modified {
-                                save_document(app_state, path.clone());
-                            }
-                        }
-                        None => {
-                            if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
-                                save_document(app_state, path);
-                            }
+    if ctrl_pressed {
+        match scan_code {
+            0x1f |     // ctrl-S (Qwerty)
+            0x20 => {  // ctrl-S (Colemak)
+                match &app_state.filename {
+                    Some(path) => {
+                        if app_state.initially_modified || app_state.view_state.modified {
+                            save_document(app_state, path.clone());
+                            app_state.update_title();
                         }
                     }
-                    return;
-                }
-                0x18 |     // ctrl-O (Qwerty)
-                0x27 => {  // ctrl-O (Colemak)
-                    if !(app_state.initially_modified || app_state.view_state.modified) ||
-                        prompt_about_unsaved_changes(app_state) {
-                        if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
-                            load_document(app_state, path);
-                            invalidate_rect(app_state.hwnd);
+                    None => {
+                        if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
+                            save_document(app_state, path);
+                            app_state.update_title();
                         }
                     }
-                    return;
                 }
-
-                0x15 => {  // ctrl-Y (Qwerty)
-                    app_state.last_action = ActionType::Other;
-                    view_state.redo();
-                    invalidate_rect(app_state.hwnd);
-                }
-                0x2c => {  // ctrl-Z
-                    app_state.last_action = ActionType::Other;
-                    view_state.undo();
-                    invalidate_rect(app_state.hwnd);
-                    return;
-                }
-
-                0x2d => {  // ctrl-X
-                    app_state.last_action = ActionType::Other;
-                    let s = view_state.cut_selection();
-                    set_clipboard(app_state.hwnd, &s);
-                    invalidate_rect(app_state.hwnd);
-                    return;
-                }
-                0x2e => {  // ctrl-C
-                    app_state.last_action = ActionType::Other;
-                    let s = view_state.get_selection();
-                    set_clipboard(app_state.hwnd, &s);
-                    return;
-                }
-                0x2f => {  // ctrl-V
-                    app_state.last_action = ActionType::Other;
-                    let s = get_clipboard(app_state.hwnd);
-                    view_state.paste(&s);
-                    invalidate_rect(app_state.hwnd);
-                    return;
-                }
-                _ => {}
+                return;
             }
+            0x18 |     // ctrl-O (Qwerty)
+            0x27 => {  // ctrl-O (Colemak)
+                if !(app_state.initially_modified || app_state.view_state.modified) ||
+                    prompt_about_unsaved_changes(app_state) {
+                    if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
+                        load_document(app_state, path);
+                        invalidate_rect(app_state.hwnd);
+                        app_state.update_title();
+                    }
+                }
+                return;
+            }
+
+            0x15 => {  // ctrl-Y (Qwerty)
+                app_state.last_action = ActionType::Other;
+                view_state.redo();
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+                return;
+            }
+            0x2c => {  // ctrl-Z
+                app_state.last_action = ActionType::Other;
+                view_state.undo();
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+                return;
+            }
+
+            0x2d => {  // ctrl-X
+                app_state.last_action = ActionType::Other;
+                let s = view_state.cut_selection();
+                set_clipboard(app_state.hwnd, &s);
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+                return;
+            }
+            0x2e => {  // ctrl-C
+                app_state.last_action = ActionType::Other;
+                let s = view_state.get_selection();
+                set_clipboard(app_state.hwnd, &s);
+                return;
+            }
+            0x2f => {  // ctrl-V
+                app_state.last_action = ActionType::Other;
+                let s = get_clipboard(app_state.hwnd);
+                view_state.paste(&s);
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+                return;
+            }
+            _ => {}
         }
+    }
 
-        let mut need_redraw = true;
-        let mut regular_movement_cmd = true;
-        match key_code {
-            VK_BACK => {
-                // TODO: also make shapshot before deleting newline
-                if app_state.last_action != ActionType::Backspace {
-                    view_state.make_undo_snapshot();
-                    app_state.last_action = ActionType::Backspace;
-                }
-                view_state.backspace();
-                regular_movement_cmd = false;
-            }
-            VK_DELETE => {
-                // TODO: also make shapshot before deleting newline
-                if app_state.last_action != ActionType::Del {
-                    view_state.make_undo_snapshot();
-                    app_state.last_action = ActionType::Del;
-                }
-                view_state.del();
-                regular_movement_cmd = false;
-            }
-            VK_LEFT => {
-                app_state.last_action = ActionType::Other;
-                if ctrl_pressed {
-                    view_state.ctrl_left()
-                } else {
-                    view_state.left()
-                }
-            }
-            VK_RIGHT => {
-                app_state.last_action = ActionType::Other;
-                if ctrl_pressed {
-                    view_state.ctrl_right()
-                } else {
-                    view_state.right()
-                }
-            }
-            VK_HOME => {
-                app_state.last_action = ActionType::Other;
-                if ctrl_pressed {
-                    view_state.ctrl_home()
-                } else {
-                    view_state.home()
-                }
-            }
-            VK_END => {
-                app_state.last_action = ActionType::Other;
-                if ctrl_pressed {
-                    view_state.ctrl_end()
-                } else {
-                    view_state.end()
-                }
-            }
-            VK_UP => {
-                app_state.last_action = ActionType::Other;
-                if ctrl_pressed {
-                    regular_movement_cmd = false;
-                    view_state.scroll(1.0)
-                } else {
-                    view_state.up()
-                }
-            }
-            VK_DOWN => {
-                app_state.last_action = ActionType::Other;
-                if ctrl_pressed  {
-                    regular_movement_cmd = false;
-                    view_state.scroll(-1.0)
-                } else {
-                    view_state.down()
-                }
-            }
-            VK_PRIOR => {
-                app_state.last_action = ActionType::Other;
-                view_state.pg_up();
-            }
-            VK_NEXT => {
-                app_state.last_action = ActionType::Other;
-                view_state.pg_down();
-            }
-            VK_RETURN => {
-                app_state.last_action = ActionType::InsertChar;
+    let mut regular_movement_cmd = true;
+    match key_code {
+        VK_BACK => {
+            // TODO: also make shapshot before deleting newline
+            if app_state.last_action != ActionType::Backspace {
                 view_state.make_undo_snapshot();
-                view_state.insert_char('\n');
-                regular_movement_cmd = false;
+                app_state.last_action = ActionType::Backspace;
             }
-            _ => {
-                need_redraw = false;
-                regular_movement_cmd = false;
+            view_state.backspace();
+            regular_movement_cmd = false;
+        }
+        VK_DELETE => {
+            // TODO: also make shapshot before deleting newline
+            if app_state.last_action != ActionType::Del {
+                view_state.make_undo_snapshot();
+                app_state.last_action = ActionType::Del;
             }
-        };
-        if regular_movement_cmd && !shift_pressed {
-            view_state.clear_selection();
+            view_state.del();
+            regular_movement_cmd = false;
         }
-        if need_redraw {
-            invalidate_rect(app_state.hwnd);
+        VK_LEFT => {
+            app_state.last_action = ActionType::Other;
+            if ctrl_pressed {
+                view_state.ctrl_left()
+            } else {
+                view_state.left()
+            }
         }
-    })();
-
+        VK_RIGHT => {
+            app_state.last_action = ActionType::Other;
+            if ctrl_pressed {
+                view_state.ctrl_right()
+            } else {
+                view_state.right()
+            }
+        }
+        VK_HOME => {
+            app_state.last_action = ActionType::Other;
+            if ctrl_pressed {
+                view_state.ctrl_home()
+            } else {
+                view_state.home()
+            }
+        }
+        VK_END => {
+            app_state.last_action = ActionType::Other;
+            if ctrl_pressed {
+                view_state.ctrl_end()
+            } else {
+                view_state.end()
+            }
+        }
+        VK_UP => {
+            app_state.last_action = ActionType::Other;
+            if ctrl_pressed {
+                regular_movement_cmd = false;
+                view_state.scroll(1.0)
+            } else {
+                view_state.up()
+            }
+        }
+        VK_DOWN => {
+            app_state.last_action = ActionType::Other;
+            if ctrl_pressed  {
+                regular_movement_cmd = false;
+                view_state.scroll(-1.0)
+            } else {
+                view_state.down()
+            }
+        }
+        VK_PRIOR => {
+            app_state.last_action = ActionType::Other;
+            view_state.pg_up();
+        }
+        VK_NEXT => {
+            app_state.last_action = ActionType::Other;
+            view_state.pg_down();
+        }
+        VK_RETURN => {
+            app_state.last_action = ActionType::InsertChar;
+            view_state.make_undo_snapshot();
+            view_state.insert_char('\n');
+            regular_movement_cmd = false;
+        }
+        _ => return,
+    };
+    if regular_movement_cmd && !shift_pressed {
+        view_state.clear_selection();
+    }
+    invalidate_rect(app_state.hwnd);
     app_state.update_title();
 }
 
