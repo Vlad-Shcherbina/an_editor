@@ -171,7 +171,7 @@ impl AppState {
         }
     }
 
-    pub fn get_title(&self) -> String {
+    fn get_title(&self) -> String {
         let mut s = String::new();
         if self.initially_modified || self.view_state.modified {
             s.push_str("* ");
@@ -182,6 +182,16 @@ impl AppState {
         };
         s
     }
+
+    fn update_title(&self) {
+        unsafe {
+            let res = SetWindowTextW(
+                self.hwnd,
+                win32_string(&self.get_title()).as_ptr());
+            assert!(res != 0);
+        }
+    }
+
 }
 
 struct Resources {
@@ -264,6 +274,13 @@ impl Resources {
             sel_brush: sel_brush.up(),
             text_format,
         }
+    }
+}
+
+fn invalidate_rect(hwnd: HWND) {
+    unsafe {
+        let res = InvalidateRect(hwnd, null(), 1);
+        assert!(res != 0);
     }
 }
 
@@ -413,12 +430,7 @@ fn load_document(app_state: &mut AppState, path: PathBuf) {
             }
             app_state.filename = Some(path);
             app_state.view_state.load(&content);
-            unsafe {
-                let res = SetWindowTextW(
-                    app_state.hwnd,
-                    win32_string(&app_state.get_title()).as_ptr());
-                assert!(res != 0);
-            }
+            app_state.update_title();
         }
         Err(e) => {
             let msg = format!("Can't open {}.\n{}", path.to_string_lossy(), e);
@@ -440,12 +452,7 @@ fn save_document(app_state: &mut AppState, path: PathBuf) -> bool {
             app_state.filename = Some(path);
             app_state.initially_modified = false;
             app_state.view_state.modified = false;
-            unsafe {
-                let res = SetWindowTextW(
-                    app_state.hwnd,
-                    win32_string(&app_state.get_title()).as_ptr());
-                assert!(res != 0);
-            }
+            app_state.update_title();
             true
         },
         Err(e) => {
@@ -530,9 +537,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                         prompt_about_unsaved_changes(app_state) {
                         if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
                             load_document(app_state, path);
-                            unsafe {
-                                InvalidateRect(app_state.hwnd, null(), 1);
-                            }
+                            invalidate_rect(app_state.hwnd);
                         }
                     }
                     return;
@@ -541,16 +546,12 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                 0x15 => {  // ctrl-Y (Qwerty)
                     app_state.last_action = ActionType::Other;
                     view_state.redo();
-                    unsafe {
-                        InvalidateRect(app_state.hwnd, null(), 1);
-                    }
+                    invalidate_rect(app_state.hwnd);
                 }
                 0x2c => {  // ctrl-Z
                     app_state.last_action = ActionType::Other;
                     view_state.undo();
-                    unsafe {
-                        InvalidateRect(app_state.hwnd, null(), 1);
-                    }
+                    invalidate_rect(app_state.hwnd);
                     return;
                 }
 
@@ -558,9 +559,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                     app_state.last_action = ActionType::Other;
                     let s = view_state.cut_selection();
                     set_clipboard(app_state.hwnd, &s);
-                    unsafe {
-                        InvalidateRect(app_state.hwnd, null(), 1);
-                    }
+                    invalidate_rect(app_state.hwnd);
                     return;
                 }
                 0x2e => {  // ctrl-C
@@ -573,9 +572,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                     app_state.last_action = ActionType::Other;
                     let s = get_clipboard(app_state.hwnd);
                     view_state.paste(&s);
-                    unsafe {
-                        InvalidateRect(app_state.hwnd, null(), 1);
-                    }
+                    invalidate_rect(app_state.hwnd);
                     return;
                 }
                 _ => {}
@@ -676,18 +673,11 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             view_state.clear_selection();
         }
         if need_redraw {
-            unsafe {
-                InvalidateRect(app_state.hwnd, null(), 1);
-            }
+            invalidate_rect(app_state.hwnd);
         }
     })();
 
-    unsafe {
-        let res = SetWindowTextW(
-            app_state.hwnd,
-            win32_string(&app_state.get_title()).as_ptr());
-        assert!(res != 0);
-    }
+    app_state.update_title();
 }
 
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
@@ -699,12 +689,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let mut app_state = AppState::new(hWnd);
             match std::env::args().nth(1) {
                 Some(path) => load_document(&mut app_state, PathBuf::from(path)),
-                None => {
-                    let res = SetWindowTextW(
-                        app_state.hwnd,
-                        win32_string(&app_state.get_title()).as_ptr());
-                    assert!(res != 0);
-                }
+                None => app_state.update_title(),
             }
             APP_STATE = Some(app_state);
             0
@@ -780,7 +765,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             if !shift_pressed {
                 app_state.view_state.clear_selection();
             }
-            InvalidateRect(hWnd, null(), 1);
+            invalidate_rect(app_state.hwnd);
             SetCapture(hWnd);
             0
         }
@@ -799,7 +784,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let x = GET_X_LPARAM(lParam);
                 let y = GET_Y_LPARAM(lParam);
                 app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
-                InvalidateRect(hWnd, null(), 1);
+                invalidate_rect(app_state.hwnd);
             }
             0
         }
@@ -816,7 +801,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
             let app_state = APP_STATE.as_mut().unwrap();
             app_state.view_state.scroll(delta);
-            InvalidateRect(hWnd, null(), 1);
+            invalidate_rect(app_state.hwnd);
             0
         }
         WM_CHAR => {
@@ -829,11 +814,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     app_state.last_action = ActionType::InsertChar;
                 }
                 app_state.view_state.insert_char(c);
-                InvalidateRect(hWnd, null(), 1);
-                let res = SetWindowTextW(
-                    hWnd,
-                    win32_string(&app_state.get_title()).as_ptr());
-                assert!(res != 0);
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
             }
             0
         }
