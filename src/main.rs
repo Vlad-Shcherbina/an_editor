@@ -94,6 +94,14 @@ fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
     }
 }
 
+#[derive(PartialEq, Eq)]
+enum ActionType {
+    InsertChar,
+    Backspace,
+    Del,
+    Other,
+}
+
 struct AppState {
     hwnd: HWND,
 
@@ -106,6 +114,7 @@ struct AppState {
     flash: Option<String>,
 
     left_button_pressed: bool,
+    last_action: ActionType,
 }
 
 impl AppState {
@@ -158,6 +167,7 @@ impl AppState {
             flash: None,
 
             left_button_pressed: false,
+            last_action: ActionType::Other,
         }
     }
 
@@ -573,6 +583,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             app_state.left_button_pressed = true;
             let x = GET_X_LPARAM(lParam);
             let y = GET_Y_LPARAM(lParam);
+            app_state.last_action = ActionType::Other;
             app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
             let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
             if !shift_pressed {
@@ -622,7 +633,10 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 || wParam == 9 /* tab */ {
                 let app_state = APP_STATE.as_mut().unwrap();
-                app_state.view_state.make_undo_snapshot();
+                if app_state.last_action != ActionType::InsertChar {
+                    app_state.view_state.make_undo_snapshot();
+                    app_state.last_action = ActionType::InsertChar;
+                }
                 app_state.view_state.insert_char(c);
                 InvalidateRect(hWnd, null(), 1);
                 let res = SetWindowTextW(
@@ -673,27 +687,32 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                         }
 
                         0x15 => {  // ctrl-Y (Qwerty)
+                            app_state.last_action = ActionType::Other;
                             view_state.redo();
                             InvalidateRect(hWnd, null(), 1);
                         }
                         0x2c => {  // ctrl-Z
+                            app_state.last_action = ActionType::Other;
                             view_state.undo();
                             InvalidateRect(hWnd, null(), 1);
                             return;
                         }
 
                         0x2d => {  // ctrl-X
+                            app_state.last_action = ActionType::Other;
                             let s = view_state.cut_selection();
                             set_clipboard(hWnd, &s);
                             InvalidateRect(hWnd, null(), 1);
                             return;
                         }
                         0x2e => {  // ctrl-C
+                            app_state.last_action = ActionType::Other;
                             let s = view_state.get_selection();
                             set_clipboard(hWnd, &s);
                             return;
                         }
                         0x2f => {  // ctrl-V
+                            app_state.last_action = ActionType::Other;
                             let s = get_clipboard(hWnd);
                             view_state.paste(&s);
                             InvalidateRect(hWnd, null(), 1);
@@ -707,56 +726,84 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let mut regular_movement_cmd = true;
                 match wParam as i32 {
                     VK_BACK => {
-                        view_state.make_undo_snapshot();
+                        // TODO: also make shapshot before deleting newline
+                        if app_state.last_action != ActionType::Backspace {
+                            view_state.make_undo_snapshot();
+                            app_state.last_action = ActionType::Backspace;
+                        }
                         view_state.backspace();
                         regular_movement_cmd = false;
                     }
                     VK_DELETE => {
-                        view_state.make_undo_snapshot();
+                        // TODO: also make shapshot before deleting newline
+                        if app_state.last_action != ActionType::Del {
+                            view_state.make_undo_snapshot();
+                            app_state.last_action = ActionType::Del;
+                        }
                         view_state.del();
                         regular_movement_cmd = false;
                     }
-                    VK_LEFT =>
+                    VK_LEFT => {
+                        app_state.last_action = ActionType::Other;
                         if ctrl_pressed {
                             view_state.ctrl_left()
                         } else {
                             view_state.left()
                         }
-                    VK_RIGHT =>
+                    }
+                    VK_RIGHT => {
+                        app_state.last_action = ActionType::Other;
                         if ctrl_pressed {
                             view_state.ctrl_right()
                         } else {
                             view_state.right()
                         }
-                    VK_HOME =>
+                    }
+                    VK_HOME => {
+                        app_state.last_action = ActionType::Other;
                         if ctrl_pressed {
                             view_state.ctrl_home()
                         } else {
                             view_state.home()
                         }
-                    VK_END =>
+                    }
+                    VK_END => {
+                        app_state.last_action = ActionType::Other;
                         if ctrl_pressed {
                             view_state.ctrl_end()
                         } else {
                             view_state.end()
                         }
-                    VK_UP =>
+                    }
+                    VK_UP => {
+                        app_state.last_action = ActionType::Other;
                         if ctrl_pressed {
                             regular_movement_cmd = false;
                             view_state.scroll(1.0)
                         } else {
                             view_state.up()
                         }
-                    VK_DOWN =>
+                    }
+                    VK_DOWN => {
+                        app_state.last_action = ActionType::Other;
                         if ctrl_pressed  {
                             regular_movement_cmd = false;
                             view_state.scroll(-1.0)
                         } else {
                             view_state.down()
                         }
-                    VK_PRIOR => view_state.pg_up(),
-                    VK_NEXT => view_state.pg_down(),
+                    }
+                    VK_PRIOR => {
+                        app_state.last_action = ActionType::Other;
+                        view_state.pg_up();
+                    }
+                    VK_NEXT => {
+                        app_state.last_action = ActionType::Other;
+                        view_state.pg_down();
+                    }
                     VK_RETURN => {
+                        app_state.last_action = ActionType::InsertChar;
+                        view_state.make_undo_snapshot();
                         view_state.insert_char('\n');
                         regular_movement_cmd = false;
                     }
