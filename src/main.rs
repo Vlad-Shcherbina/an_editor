@@ -554,6 +554,12 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                 app_state.update_title();
                 return;
             }
+            65 => {  // ord('A')
+                app_state.last_action = ActionType::Other;
+                view_state.select_all();
+                invalidate_rect(app_state.hwnd);
+                return;
+            }
             83 => {  // ord('S')
                 match &app_state.filename {
                     Some(path) => {

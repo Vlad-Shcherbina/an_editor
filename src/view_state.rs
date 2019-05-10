@@ -167,6 +167,11 @@ impl ViewState {
         self.selection_pos = self.cursor_pos;
     }
 
+    pub fn select_all(&mut self) {
+        self.selection_pos = 0;
+        self.cursor_pos = self.document.len();
+    }
+
     pub fn paste(&mut self, s: &str) {
         let s: Vec<char> = s.chars().collect();
         if self.selection_pos != self.cursor_pos {
