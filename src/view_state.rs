@@ -655,6 +655,9 @@ impl ViewState {
     }
 
     fn anchor_line_and_y(&mut self) -> (usize, f32) {
+        // it could be out of range after an edit
+        self.anchor_pos = self.anchor_pos.min(self.document.len());
+
         let anchor_line = self.document.find_line(self.anchor_pos);
         self.ensure_layout(anchor_line);
         let line = self.document.get_line(anchor_line);
