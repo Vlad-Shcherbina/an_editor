@@ -515,6 +515,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
         match scan_code {
             0x2d => {  // ctrl-X
                 app_state.last_action = ActionType::Other;
+                view_state.make_undo_snapshot();
                 let s = view_state.cut_selection();
                 set_clipboard(app_state.hwnd, &s);
                 invalidate_rect(app_state.hwnd);
@@ -529,6 +530,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
             0x2f => {  // ctrl-V
                 app_state.last_action = ActionType::Other;
+                view_state.make_undo_snapshot();
                 let s = get_clipboard(app_state.hwnd);
                 view_state.paste(&s);
                 invalidate_rect(app_state.hwnd);
