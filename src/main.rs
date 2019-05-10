@@ -109,7 +109,6 @@ struct AppState {
     view_state: ViewState,
 
     filename: Option<PathBuf>,
-    initially_modified: bool,
 
     flash: Option<String>,
 
@@ -162,7 +161,6 @@ impl AppState {
             view_state,
 
             filename: None,
-            initially_modified: false,
 
             flash: None,
 
@@ -173,7 +171,7 @@ impl AppState {
 
     fn get_title(&self) -> String {
         let mut s = String::new();
-        if self.initially_modified || self.view_state.modified {
+        if self.view_state.modified() {
             s.push_str("* ");
         }
         match &self.filename {
@@ -421,15 +419,17 @@ fn file_dialog(hwnd: HWND, tp: FileDialogType) -> Option<PathBuf> {
 fn load_document(app_state: &mut AppState, path: PathBuf) {
     match std::fs::read_to_string(&path) {
         Ok(mut content) => {
-            if content.contains('\r') {
+            let initially_modified = if content.contains('\r') {
                 content = content.replace('\r', "");
-                app_state.initially_modified = true;
                 assert!(app_state.flash.is_none());
                 app_state.flash = Some(
                     "CRLF line breaks were converted to LF".to_owned());
-            }
+                true
+            } else {
+                false
+            };
             app_state.filename = Some(path);
-            app_state.view_state.load(&content);
+            app_state.view_state.load(&content, initially_modified);
             app_state.update_title();
         }
         Err(e) => {
@@ -450,8 +450,7 @@ fn save_document(app_state: &mut AppState, path: PathBuf) -> bool {
     match std::fs::write(&path, content) {
         Ok(()) => {
             app_state.filename = Some(path);
-            app_state.initially_modified = false;
-            app_state.view_state.modified = false;
+            app_state.view_state.set_unmodified_snapshot();
             app_state.update_title();
             true
         },
@@ -518,7 +517,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             0x20 => {  // ctrl-S (Colemak)
                 match &app_state.filename {
                     Some(path) => {
-                        if app_state.initially_modified || app_state.view_state.modified {
+                        if app_state.view_state.modified() {
                             save_document(app_state, path.clone());
                             app_state.update_title();
                         }
@@ -526,6 +525,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                     None => {
                         if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
                             save_document(app_state, path);
+                            app_state.view_state.set_unmodified_snapshot();
                             app_state.update_title();
                         }
                     }
@@ -534,7 +534,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
             0x18 |     // ctrl-O (Qwerty)
             0x27 => {  // ctrl-O (Colemak)
-                if !(app_state.initially_modified || app_state.view_state.modified) ||
+                if !app_state.view_state.modified() ||
                     prompt_about_unsaved_changes(app_state) {
                     if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
                         load_document(app_state, path);
@@ -702,7 +702,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_CLOSE => {
             let app_state = APP_STATE.as_mut().unwrap();
             println!("WM_CLOSE");
-            if !(app_state.initially_modified || app_state.view_state.modified) ||
+            if !app_state.view_state.modified() ||
                prompt_about_unsaved_changes(app_state) {
                 DestroyWindow(hWnd);
             }

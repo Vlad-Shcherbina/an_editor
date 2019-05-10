@@ -26,8 +26,6 @@ pub struct ViewState {
     text_format: ComPtr<IDWriteTextFormat>,
     dwrite_factory: ComPtr<IDWriteFactory>,
 
-    pub modified: bool,
-
     document: LineGapBuffer<Option<TextLayout>>,
     cursor_pos: usize,
     selection_pos: usize,
@@ -43,6 +41,8 @@ pub struct ViewState {
     undo_snapshots: Vec<UndoSnapshot>,
     redo_slice_edits: Vec<SliceEdit>,
     redo_snapshots: Vec<UndoSnapshot>,
+
+    unmodified_snapshot: Option<usize>,
 }
 
 impl ViewState {
@@ -57,7 +57,6 @@ impl ViewState {
             height,
             text_format,
             dwrite_factory,
-            modified: false,
             document: LineGapBuffer::new(),
             cursor_pos: 0,
             selection_pos: 0,
@@ -68,6 +67,7 @@ impl ViewState {
             undo_snapshots: Vec::new(),
             redo_slice_edits: Vec::new(),
             redo_snapshots: Vec::new(),
+            unmodified_snapshot: Some(0),
         }
     }
 
@@ -89,6 +89,10 @@ impl ViewState {
         self.undo_slice_edits.extend(u.into_iter());
     }
 
+    pub fn modified(&self) -> bool {
+        self.unmodified_snapshot != Some(self.undo_snapshots.len())
+    }
+
     pub fn make_undo_snapshot(&mut self) {
         if let Some(&UndoSnapshot { slice_edit_count, cursor_pos }) = self.undo_snapshots.last() {
             if cursor_pos == self.cursor_pos && slice_edit_count == self.undo_slice_edits.len() {
@@ -101,6 +105,11 @@ impl ViewState {
         });
         self.redo_snapshots.clear();
         self.redo_slice_edits.clear();
+        if let Some(n) = self.unmodified_snapshot {
+            if n > self.redo_snapshots.len() {
+                self.unmodified_snapshot = None;
+            }
+        }
     }
 
     pub fn undo(&mut self) {
@@ -129,10 +138,13 @@ impl ViewState {
         std::mem::swap(&mut self.undo_slice_edits, &mut self.redo_slice_edits);
     }
 
-    pub fn load(&mut self, text: &str) {
-        self.modified = false;
+    pub fn load(&mut self, text: &str, initially_modified: bool) {
         let text: Vec<char> = text.chars().collect();
-        self.replace_slice(0, self.document.len(), &text);
+        self.document.replace_slice(0, self.document.len(), &text);
+        self.undo_snapshots.clear();
+        self.undo_slice_edits.clear();
+        self.redo_snapshots.clear();
+        self.redo_slice_edits.clear();
         // move gap to the beginning to avoid delay on first edit
         self.document.replace_slice(0, 0, &[]);
         self.cursor_pos = 0;
@@ -140,6 +152,11 @@ impl ViewState {
         self.anchor_pos = 0;
         self.anchor_y = 0.0;
         self.anchor_x = 0.0;
+        self.unmodified_snapshot = if initially_modified { None } else { Some(0) };
+    }
+
+    pub fn set_unmodified_snapshot(&mut self) {
+        self.unmodified_snapshot = Some(self.undo_snapshots.len());
     }
 
     pub fn content(&self) -> String {
@@ -151,7 +168,6 @@ impl ViewState {
     }
 
     pub fn paste(&mut self, s: &str) {
-        self.modified = true;
         let s: Vec<char> = s.chars().collect();
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);
@@ -175,7 +191,6 @@ impl ViewState {
     }
 
     pub fn cut_selection(&mut self) -> String {
-        self.modified = true;
         let a = self.cursor_pos.min(self.selection_pos);
         let b = self.cursor_pos.max(self.selection_pos);
         let result = self.document.slice_string(a, b);
@@ -188,7 +203,6 @@ impl ViewState {
     }
 
     pub fn insert_char(&mut self, c: char) {
-        self.modified = true;
         if self.selection_pos != self.cursor_pos {
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
@@ -208,7 +222,6 @@ impl ViewState {
 
     pub fn backspace(&mut self) {
         if self.selection_pos != self.cursor_pos {
-            self.modified = true;
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
             self.replace_slice(a, b, &[]);
@@ -219,7 +232,6 @@ impl ViewState {
             return;
         }
         if self.cursor_pos > 0 {
-            self.modified = true;
             self.cursor_pos -=1;
             self.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
@@ -230,7 +242,6 @@ impl ViewState {
 
     pub fn del(&mut self) {
         if self.selection_pos != self.cursor_pos {
-            self.modified = true;
             let a = self.cursor_pos.min(self.selection_pos);
             let b = self.cursor_pos.max(self.selection_pos);
             self.replace_slice(a, b, &[]);
@@ -241,7 +252,6 @@ impl ViewState {
             return;
         }
         if self.cursor_pos < self.document.len() {
-            self.modified = true;
             self.replace_slice(self.cursor_pos, self.cursor_pos + 1, &[]);
             self.clear_selection();
             self.ensure_cursor_on_screen();
