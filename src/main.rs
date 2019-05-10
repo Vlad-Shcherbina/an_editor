@@ -513,53 +513,6 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
 
     if ctrl_pressed {
         match scan_code {
-            0x1f |     // ctrl-S (Qwerty)
-            0x20 => {  // ctrl-S (Colemak)
-                match &app_state.filename {
-                    Some(path) => {
-                        if app_state.view_state.modified() {
-                            save_document(app_state, path.clone());
-                            app_state.update_title();
-                        }
-                    }
-                    None => {
-                        if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
-                            save_document(app_state, path);
-                            app_state.view_state.set_unmodified_snapshot();
-                            app_state.update_title();
-                        }
-                    }
-                }
-                return;
-            }
-            0x18 |     // ctrl-O (Qwerty)
-            0x27 => {  // ctrl-O (Colemak)
-                if !app_state.view_state.modified() ||
-                    prompt_about_unsaved_changes(app_state) {
-                    if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
-                        load_document(app_state, path);
-                        invalidate_rect(app_state.hwnd);
-                        app_state.update_title();
-                    }
-                }
-                return;
-            }
-
-            0x15 => {  // ctrl-Y (Qwerty)
-                app_state.last_action = ActionType::Other;
-                view_state.redo();
-                invalidate_rect(app_state.hwnd);
-                app_state.update_title();
-                return;
-            }
-            0x2c => {  // ctrl-Z
-                app_state.last_action = ActionType::Other;
-                view_state.undo();
-                invalidate_rect(app_state.hwnd);
-                app_state.update_title();
-                return;
-            }
-
             0x2d => {  // ctrl-X
                 app_state.last_action = ActionType::Other;
                 let s = view_state.cut_selection();
@@ -580,6 +533,52 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
                 view_state.paste(&s);
                 invalidate_rect(app_state.hwnd);
                 app_state.update_title();
+                return;
+            }
+            0x2c => {  // ctrl-Z
+                app_state.last_action = ActionType::Other;
+                view_state.undo();
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+                return;
+            }
+            _ => {}
+        }
+        match key_code {
+            89 => {  // ord('Y')
+                app_state.last_action = ActionType::Other;
+                view_state.redo();
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+                return;
+            }
+            83 => {  // ord('S')
+                match &app_state.filename {
+                    Some(path) => {
+                        if app_state.view_state.modified() {
+                            save_document(app_state, path.clone());
+                            app_state.update_title();
+                        }
+                    }
+                    None => {
+                        if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
+                            save_document(app_state, path);
+                            app_state.view_state.set_unmodified_snapshot();
+                            app_state.update_title();
+                        }
+                    }
+                }
+                return;
+            }
+            79 => {  // ord('O')
+                if !app_state.view_state.modified() ||
+                    prompt_about_unsaved_changes(app_state) {
+                    if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
+                        load_document(app_state, path);
+                        invalidate_rect(app_state.hwnd);
+                        app_state.update_title();
+                    }
+                }
                 return;
             }
             _ => {}
