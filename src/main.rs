@@ -693,9 +693,9 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_CREATE => {
             println!("WM_CREATE");
             let mut app_state = AppState::new(hWnd);
-            match std::env::args().nth(1) {
-                Some(path) => load_document(&mut app_state, PathBuf::from(path)),
-                None => app_state.update_title(),
+            app_state.update_title();
+            if let Some(path) = std::env::args().nth(1) {
+                load_document(&mut app_state, PathBuf::from(path));
             }
             APP_STATE = Some(app_state);
             0
