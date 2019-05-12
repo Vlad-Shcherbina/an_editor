@@ -284,8 +284,7 @@ fn invalidate_rect(hwnd: HWND) {
 
 const PADDING_LEFT: f32 = 5.0;
 
-fn paint() {
-    let app_state = unsafe { APP_STATE.as_mut().unwrap() };
+fn paint(app_state: &mut AppState) {
     let resources = &app_state.resources;
     let view_state = &mut app_state.view_state;
     let rt = &resources.render_target;
@@ -686,28 +685,50 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
     app_state.update_title();
 }
 
+fn get_app_state<'a>(hwnd: HWND) -> std::sync::MutexGuard<'a, AppState> {
+    let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    assert!(user_data != 0, "{}", Error::last_os_error());
+    let lock = user_data as *const std::sync::Mutex<AppState>;
+    let lock = unsafe { &*lock };
+    lock.lock().unwrap()
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {
             println!("WM_CREATE");
+
             let mut app_state = AppState::new(hWnd);
             app_state.update_title();
             if let Some(path) = std::env::args().nth(1) {
                 load_document(&mut app_state, PathBuf::from(path));
             }
-            APP_STATE = Some(app_state);
+
+            let user_data = Box::into_raw(Box::new(std::sync::Mutex::new(app_state)));
+            let user_data = user_data as isize;
+
+            let old_user_data = SetWindowLongPtrW(hWnd, GWLP_USERDATA, user_data);
+            assert!(old_user_data == 0);
+            let e = Error::last_os_error();
+            assert!(e.raw_os_error() == Some(0), "{}", e);
+
             0
         }
         WM_NCDESTROY => {
             println!("WM_NCDESTROY");
-            drop(APP_STATE.take());
+
+            let user_data = GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+            assert!(user_data != 0, "{}", Error::last_os_error());
+            let app_state = Box::from_raw(user_data as *mut std::sync::Mutex<AppState>);
+            drop(app_state);
+
             PostQuitMessage(0);
             0
         }
         WM_CLOSE => {
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
             println!("WM_CLOSE");
             if !app_state.view_state.modified() ||
                prompt_about_unsaved_changes(app_state) {
@@ -717,11 +738,11 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_PAINT => {
             println!("WM_PAINT");
-            paint();
+            let app_state =  &mut *get_app_state(hWnd);
+            paint(app_state);
             let ret = ValidateRect(hWnd, null());
             assert!(ret != 0);
 
-            let app_state = APP_STATE.as_mut().unwrap();
             match app_state.flash.take() {
                 Some(s) => {
                     println!("flash");
@@ -738,7 +759,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_SIZE => {
             println!("WM_SIZE");
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
             let resources = &app_state.resources;
             let view_state = &mut app_state.view_state;
 
@@ -760,7 +781,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONDOWN => {
             println!("WM_LBUTTONDOWN");
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
 
             app_state.left_button_pressed = true;
             let x = GET_X_LPARAM(lParam);
@@ -777,7 +798,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONUP => {
             println!("WM_LBUTTONUP");
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
             app_state.left_button_pressed = false;
             let res = ReleaseCapture();
             assert!(res != 0);
@@ -785,7 +806,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_MOUSEMOVE => {
             // println!("WM_MOUSEMOVE");
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
             if app_state.left_button_pressed {
                 let x = GET_X_LPARAM(lParam);
                 let y = GET_Y_LPARAM(lParam);
@@ -805,7 +826,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 0);
             assert!(res != 0);
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
             app_state.view_state.scroll(delta);
             invalidate_rect(app_state.hwnd);
             0
@@ -814,7 +835,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 || wParam == 9 /* tab */ {
-                let app_state = APP_STATE.as_mut().unwrap();
+                let app_state =  &mut *get_app_state(hWnd);
                 if app_state.last_action != ActionType::InsertChar {
                     app_state.view_state.make_undo_snapshot();
                     app_state.last_action = ActionType::InsertChar;
@@ -829,15 +850,13 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {}", wParam);
             let key_code = wParam as i32;
             let scan_code = ((lParam >> 16) & 511) as i32;
-            let app_state = APP_STATE.as_mut().unwrap();
+            let app_state =  &mut *get_app_state(hWnd);
             handle_keydown(app_state, key_code, scan_code);
             0
         }
         _ => DefWindowProcW(hWnd, msg, wParam, lParam)
     }
 }
-
-static mut APP_STATE: Option<AppState> = None;
 
 fn panic_hook(pi: &std::panic::PanicInfo) {
     let payload =
@@ -864,12 +883,8 @@ fn panic_hook(pi: &std::panic::PanicInfo) {
     std::fs::write("error.txt", message).unwrap();
 
     unsafe {
-        let hwnd = match APP_STATE.as_ref() {
-            Some(app_state) => app_state.hwnd,
-            None => null_mut(),
-        };
         MessageBoxW(
-            hwnd,
+            null_mut(),  // hwnd
             win32_string("A programming error has occurred.\nDiagnostic info is in 'error.txt'").as_ptr(),
             win32_string("an editor - error").as_ptr(),
             MB_OK | MB_ICONERROR);
