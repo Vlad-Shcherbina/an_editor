@@ -839,45 +839,47 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
 static mut APP_STATE: Option<AppState> = None;
 
-fn main() -> Result<(), Error> {
-    std::panic::set_hook(Box::new(|pi| {
-        let payload =
-            if let Some(s) = pi.payload().downcast_ref::<&str>() {
-                (*s).to_owned()
-            } else if let Some(s) = pi.payload().downcast_ref::<String>() {
-                s.clone()
-            } else {
-                String::new()
-            };
-        let loc = match pi.location() {
-            Some(loc) => format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
-            None => "location unknown".to_owned()
+fn panic_hook(pi: &std::panic::PanicInfo) {
+    let payload =
+        if let Some(s) = pi.payload().downcast_ref::<&str>() {
+            (*s).to_owned()
+        } else if let Some(s) = pi.payload().downcast_ref::<String>() {
+            s.clone()
+        } else {
+            String::new()
         };
+    let loc = match pi.location() {
+        Some(loc) => format!("{}:{}:{}", loc.file(), loc.line(), loc.column()),
+        None => "location unknown".to_owned()
+    };
 
-        // (anchor:aIMTMDTQfJDYrJxa)
-        let exe = std::env::current_exe().unwrap();
-        let exe_dir = exe.parent().unwrap();
-        std::env::set_current_dir(exe_dir).unwrap();
+    // (anchor:aIMTMDTQfJDYrJxa)
+    let exe = std::env::current_exe().unwrap();
+    let exe_dir = exe.parent().unwrap();
+    std::env::set_current_dir(exe_dir).unwrap();
 
-        let bt = backtrace::Backtrace::new();
-        let message = format!("panic {:?}, {}\n{:?}", payload, loc, bt);
-        println!("{}", message);
-        std::fs::write("error.txt", message).unwrap();
+    let bt = backtrace::Backtrace::new();
+    let message = format!("panic {:?}, {}\n{:?}", payload, loc, bt);
+    println!("{}", message);
+    std::fs::write("error.txt", message).unwrap();
 
-        unsafe {
-            let hwnd = match APP_STATE.as_ref() {
-                Some(app_state) => app_state.hwnd,
-                None => null_mut(),
-            };
-            MessageBoxW(
-                hwnd,
-                win32_string("A programming error has occurred.\nDiagnostic info is in 'error.txt'").as_ptr(),
-                win32_string("an editor - error").as_ptr(),
-                MB_OK | MB_ICONERROR);
-        }
+    unsafe {
+        let hwnd = match APP_STATE.as_ref() {
+            Some(app_state) => app_state.hwnd,
+            None => null_mut(),
+        };
+        MessageBoxW(
+            hwnd,
+            win32_string("A programming error has occurred.\nDiagnostic info is in 'error.txt'").as_ptr(),
+            win32_string("an editor - error").as_ptr(),
+            MB_OK | MB_ICONERROR);
+    }
 
-        std::process::exit(1);
-    }));
+    std::process::exit(1);
+}
+
+fn main() -> Result<(), Error> {
+    std::panic::set_hook(Box::new(panic_hook));
 
     let _hwnd = create_window("an_editor", "window title")?;
     loop {
