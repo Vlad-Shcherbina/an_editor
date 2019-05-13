@@ -538,6 +538,34 @@ fn handle_keydown(app_state: &mut RefCell<AppState>, key_code: i32, scan_code: i
     let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
     let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
 
+    match key_code {
+        VK_DELETE if shift_pressed => {  // shift-del (cut)
+            a.last_action = ActionType::Other;
+            view_state.make_undo_snapshot();
+            let s = view_state.cut_selection();
+            set_clipboard(a.hwnd, &s);
+            invalidate_rect(a.hwnd);
+            a.update_title();
+            return;
+        }
+        VK_INSERT if ctrl_pressed && !shift_pressed => {  // ctrl-ins (copy)
+            a.last_action = ActionType::Other;
+            let s = view_state.get_selection();
+            set_clipboard(a.hwnd, &s);
+            return;
+        }
+        VK_INSERT if shift_pressed && !ctrl_pressed => {  // shift-ins (paste)
+            a.last_action = ActionType::Other;
+            view_state.make_undo_snapshot();
+            let s = get_clipboard(a.hwnd);
+            view_state.paste(&s);
+            invalidate_rect(a.hwnd);
+            a.update_title();
+            return;
+        }
+        _ => {}
+    }
+
     if ctrl_pressed {
         match scan_code {
             0x2d => {  // ctrl-X
