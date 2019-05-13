@@ -508,6 +508,27 @@ impl ViewState {
         self.anchor_x = self.pos_to_coord(self.cursor_pos).0;
     }
 
+    pub fn double_click(&mut self, x: f32, y: f32) {
+        let pos = self.coord_to_pos(x, y);
+        let mut start = pos;
+        while start > 0 {
+            if !self.document.get_char(start - 1).is_alphanumeric() {
+                break;
+            }
+            start -= 1;
+        }
+        let mut end = pos;
+        while end < self.document.len() {
+            if !self.document.get_char(end).is_alphanumeric() {
+                break;
+            }
+            end += 1;
+        }
+        self.selection_pos = start;
+        self.cursor_pos = end;
+        self.ensure_cursor_on_screen();
+    }
+
     fn pos_to_coord(&mut self, pos: usize) -> (f32, f32) {
         let (anchor_line, anchor_line_y) = self.anchor_line_and_y();
         let line_no = self.document.find_line(pos);

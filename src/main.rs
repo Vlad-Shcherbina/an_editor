@@ -56,7 +56,7 @@ fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
         }
 
         let wnd_class = WNDCLASSW {
-            style : CS_OWNDC | CS_HREDRAW | CS_VREDRAW,
+            style : CS_OWNDC | CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
             lpfnWndProc : Some(my_window_proc),
             lpszClassName : class_name.as_ptr(),
             hInstance,
@@ -871,6 +871,15 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             app_state.left_button_pressed = false;
             let res = ReleaseCapture();
             assert!(res != 0);
+            0
+        }
+        WM_LBUTTONDBLCLK => {
+            println!("WM_LBUTTONDBLCLK");
+            let mut app_state =  get_app_state(hWnd).borrow_mut();
+            let x = GET_X_LPARAM(lParam);
+            let y = GET_Y_LPARAM(lParam);
+            app_state.view_state.double_click(x as f32 - PADDING_LEFT, y as f32);
+            invalidate_rect(app_state.hwnd);
             0
         }
         WM_MOUSEMOVE => {
