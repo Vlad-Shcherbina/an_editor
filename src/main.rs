@@ -7,6 +7,7 @@ use std::mem;
 use std::ptr::{null, null_mut};
 use std::io::Error;
 use std::path::PathBuf;
+use std::cell::RefCell;
 
 use winapi::Interface;
 use winapi::shared::minwindef::*;
@@ -26,6 +27,7 @@ use winapi::um::d2d1::{
     D2D1_POINT_2F,
 };
 use winapi::um::commdlg::*;
+use winapi::ctypes::*;
 
 mod com_ptr;
 mod text_layout;
@@ -364,7 +366,10 @@ enum FileDialogType {
     SaveAs,
 }
 
-fn file_dialog(hwnd: HWND, tp: FileDialogType) -> Option<PathBuf> {
+// mut app_state is passed to ensure that it's not borrowed at the time,
+// for window proc reentrancy
+fn file_dialog(app_state: &mut RefCell<AppState>, tp: FileDialogType) -> Option<PathBuf> {
+    let hwnd = app_state.borrow_mut().hwnd;
     let mut buf: Vec<u16> = vec![0 as u16; 1024];
     let mut d = OPENFILENAMEW {
         lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
@@ -415,9 +420,37 @@ fn file_dialog(hwnd: HWND, tp: FileDialogType) -> Option<PathBuf> {
     }
 }
 
-fn load_document(app_state: &mut AppState, path: PathBuf) {
+// Unsafe because one must remember that it's blocking
+// and has its own message loop, so when using from window proc
+// one must ensure reentrancy.
+unsafe fn message_box_raw(hwnd: HWND, title: &str, message: &str, u_type: UINT) -> c_int {
+    let res = MessageBoxW(
+        hwnd,
+        win32_string(message).as_ptr(),
+        win32_string(title).as_ptr(),
+        u_type);
+    assert!(res != 0, "{}", Error::last_os_error());
+    res
+}
+
+// mut app_state is passed to ensure that it's not borrowed at the time,
+// for window proc reentrancy
+fn message_box(
+    app_state: &mut RefCell<AppState>,
+    title: &str,
+    message: &str,
+    u_type: UINT,
+) -> c_int {
+    let hwnd = app_state.borrow_mut().hwnd;
+    unsafe {
+        message_box_raw(hwnd, title, message, u_type)
+    }
+}
+
+fn load_document(app_state: &mut RefCell<AppState>, path: PathBuf) {
     match std::fs::read_to_string(&path) {
         Ok(mut content) => {
+            let mut app_state = app_state.borrow_mut();
             let initially_modified = if content.contains('\r') {
                 content = content.replace('\r', "");
                 assert!(app_state.flash.is_none());
@@ -433,35 +466,29 @@ fn load_document(app_state: &mut AppState, path: PathBuf) {
         }
         Err(e) => {
             let msg = format!("Can't open {}.\n{}", path.to_string_lossy(), e);
-            unsafe {
-                MessageBoxW(
-                    app_state.hwnd,
-                    win32_string(&msg).as_ptr(),
-                    win32_string("an editor - error").as_ptr(),
-                    MB_OK | MB_ICONERROR);
-            }
+            message_box(
+                app_state,
+                "an editor - error",
+                &msg,
+                MB_OK | MB_ICONERROR);
         }
     }
 }
 
-fn save_document(app_state: &mut AppState, path: PathBuf) -> bool {
-    let content: String = app_state.view_state.content();
+fn save_document(app_state: &mut RefCell<AppState>, path: PathBuf) -> bool {
+    let mut g = app_state.borrow_mut();
+    let content: String = g.view_state.content();
     match std::fs::write(&path, content) {
         Ok(()) => {
-            app_state.filename = Some(path);
-            app_state.view_state.set_unmodified_snapshot();
-            app_state.update_title();
+            g.filename = Some(path);
+            g.view_state.set_unmodified_snapshot();
+            g.update_title();
             true
         },
         Err(e) => {
             let msg = format!("Can't write to {}.\n{}", path.to_string_lossy(), e);
-            unsafe {
-                MessageBoxW(
-                    app_state.hwnd,
-                    win32_string(&msg).as_ptr(),
-                    win32_string("an editor - error").as_ptr(),
-                    MB_OK | MB_ICONERROR);
-            }
+            drop(g);
+            message_box(app_state, "an editor - error", &msg, MB_OK | MB_ICONERROR);
             false
         }
     }
@@ -469,24 +496,23 @@ fn save_document(app_state: &mut AppState, path: PathBuf) -> bool {
 
 // Returns true if it's ok to proceed
 // (that is, the changes were saved or the user chose to abandon them).
-fn prompt_about_unsaved_changes(app_state: &mut AppState) -> bool {
-    let res = unsafe {
-        MessageBoxW(
-            app_state.hwnd,
-            win32_string("Do you want to save changes to the current document?").as_ptr(),
-            win32_string("an editor - unsaved changes").as_ptr(),
-            MB_YESNOCANCEL | MB_ICONWARNING)
-    };
+fn prompt_about_unsaved_changes(app_state: &mut RefCell<AppState>) -> bool {
+    let res = message_box(
+        app_state,
+        "an editor - unsaved changes",
+        "Do you want to save changes to the current document?",
+        MB_YESNOCANCEL | MB_ICONWARNING);
     match res {
         IDYES => {
-            match &app_state.filename {
+            let path = app_state.borrow_mut().filename.clone();
+            match path {
                 Some(path) => {
-                    if save_document(app_state, path.clone()) {
+                    if save_document(app_state, path) {
                         return true;
                     }
                 }
                 None => {
-                    if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
+                    if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
                         save_document(app_state, path);
                         // Intentionally not returning true after
                         // "saving as" untitled document,
@@ -499,13 +525,15 @@ fn prompt_about_unsaved_changes(app_state: &mut AppState) -> bool {
             return true;
         }
         IDCANCEL => {}
-        _ => panic!("{}", res),
+        _ => unreachable!("{}", res),
     }
     false
 }
 
-fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
-    let view_state = &mut app_state.view_state;
+fn handle_keydown(app_state: &mut RefCell<AppState>, key_code: i32, scan_code: i32) {
+    let mut g = app_state.borrow_mut();
+    let a = &mut *g;
+    let view_state = &mut a.view_state;
 
     let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
     let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
@@ -513,75 +541,83 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
     if ctrl_pressed {
         match scan_code {
             0x2d => {  // ctrl-X
-                app_state.last_action = ActionType::Other;
+                a.last_action = ActionType::Other;
                 view_state.make_undo_snapshot();
                 let s = view_state.cut_selection();
-                set_clipboard(app_state.hwnd, &s);
-                invalidate_rect(app_state.hwnd);
-                app_state.update_title();
+                set_clipboard(a.hwnd, &s);
+                invalidate_rect(a.hwnd);
+                a.update_title();
                 return;
             }
             0x2e => {  // ctrl-C
-                app_state.last_action = ActionType::Other;
+                a.last_action = ActionType::Other;
                 let s = view_state.get_selection();
-                set_clipboard(app_state.hwnd, &s);
+                set_clipboard(a.hwnd, &s);
                 return;
             }
             0x2f => {  // ctrl-V
-                app_state.last_action = ActionType::Other;
+                a.last_action = ActionType::Other;
                 view_state.make_undo_snapshot();
-                let s = get_clipboard(app_state.hwnd);
+                let s = get_clipboard(a.hwnd);
                 view_state.paste(&s);
-                invalidate_rect(app_state.hwnd);
-                app_state.update_title();
+                invalidate_rect(a.hwnd);
+                a.update_title();
                 return;
             }
             0x2c => {  // ctrl-Z
-                app_state.last_action = ActionType::Other;
+                a.last_action = ActionType::Other;
                 view_state.undo();
-                invalidate_rect(app_state.hwnd);
-                app_state.update_title();
+                invalidate_rect(a.hwnd);
+                a.update_title();
                 return;
             }
             _ => {}
         }
         match key_code {
             89 => {  // ord('Y')
-                app_state.last_action = ActionType::Other;
+                a.last_action = ActionType::Other;
                 view_state.redo();
-                invalidate_rect(app_state.hwnd);
-                app_state.update_title();
+                invalidate_rect(a.hwnd);
+                a.update_title();
                 return;
             }
             65 => {  // ord('A')
-                app_state.last_action = ActionType::Other;
+                a.last_action = ActionType::Other;
                 view_state.select_all();
-                invalidate_rect(app_state.hwnd);
+                invalidate_rect(a.hwnd);
                 return;
             }
             83 => {  // ord('S')
-                match &app_state.filename {
+                match &a.filename {
                     Some(path) => {
-                        if app_state.view_state.modified() {
-                            save_document(app_state, path.clone());
-                            app_state.update_title();
+                        if a.view_state.modified() {
+                            let path = path.clone();
+                            drop(g);
+                            save_document(app_state, path);
+                            app_state.borrow_mut().update_title();
                         }
                     }
                     None => {
-                        if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::SaveAs) {
+                        drop(g);
+                        if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
                             save_document(app_state, path);
-                            app_state.view_state.set_unmodified_snapshot();
-                            app_state.update_title();
+                            let mut g = app_state.borrow_mut();
+                            g.view_state.set_unmodified_snapshot();
+                            g.update_title();
                         }
                     }
                 }
                 return;
             }
             79 => {  // ord('O')
-                if !app_state.view_state.modified() ||
+                let modified = g.view_state.modified();
+                drop(g);
+                if !modified ||
                     prompt_about_unsaved_changes(app_state) {
-                    if let Some(path) = file_dialog(app_state.hwnd, FileDialogType::Open) {
+
+                    if let Some(path) = file_dialog(app_state, FileDialogType::Open) {
                         load_document(app_state, path);
+                        let app_state = app_state.borrow_mut();
                         invalidate_rect(app_state.hwnd);
                         app_state.update_title();
                     }
@@ -596,24 +632,24 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
     match key_code {
         VK_BACK => {
             // TODO: also make shapshot before deleting newline
-            if app_state.last_action != ActionType::Backspace {
+            if a.last_action != ActionType::Backspace {
                 view_state.make_undo_snapshot();
-                app_state.last_action = ActionType::Backspace;
+                a.last_action = ActionType::Backspace;
             }
             view_state.backspace();
             regular_movement_cmd = false;
         }
         VK_DELETE => {
             // TODO: also make shapshot before deleting newline
-            if app_state.last_action != ActionType::Del {
+            if a.last_action != ActionType::Del {
                 view_state.make_undo_snapshot();
-                app_state.last_action = ActionType::Del;
+                a.last_action = ActionType::Del;
             }
             view_state.del();
             regular_movement_cmd = false;
         }
         VK_LEFT => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             if ctrl_pressed {
                 view_state.ctrl_left()
             } else {
@@ -621,7 +657,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
         }
         VK_RIGHT => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             if ctrl_pressed {
                 view_state.ctrl_right()
             } else {
@@ -629,7 +665,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
         }
         VK_HOME => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             if ctrl_pressed {
                 view_state.ctrl_home()
             } else {
@@ -637,7 +673,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
         }
         VK_END => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             if ctrl_pressed {
                 view_state.ctrl_end()
             } else {
@@ -645,7 +681,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
         }
         VK_UP => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             if ctrl_pressed {
                 regular_movement_cmd = false;
                 view_state.scroll(1.0)
@@ -654,7 +690,7 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
         }
         VK_DOWN => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             if ctrl_pressed  {
                 regular_movement_cmd = false;
                 view_state.scroll(-1.0)
@@ -663,15 +699,15 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
             }
         }
         VK_PRIOR => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             view_state.pg_up();
         }
         VK_NEXT => {
-            app_state.last_action = ActionType::Other;
+            a.last_action = ActionType::Other;
             view_state.pg_down();
         }
         VK_RETURN => {
-            app_state.last_action = ActionType::InsertChar;
+            a.last_action = ActionType::InsertChar;
             view_state.make_undo_snapshot();
             view_state.insert_char('\n');
             regular_movement_cmd = false;
@@ -681,16 +717,18 @@ fn handle_keydown(app_state: &mut AppState, key_code: i32, scan_code: i32) {
     if regular_movement_cmd && !shift_pressed {
         view_state.clear_selection();
     }
-    invalidate_rect(app_state.hwnd);
-    app_state.update_title();
+    invalidate_rect(a.hwnd);
+    a.update_title();
 }
 
-fn get_app_state<'a>(hwnd: HWND) -> std::sync::MutexGuard<'a, AppState> {
+// Don't use .get_mut() on it, use .borrow_mut().
+// We still use runtime check because not all ways window proc
+// can be reentered are annotated like message_box().
+fn get_app_state<'a>(hwnd: HWND) -> &'a mut RefCell<AppState> {
     let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     assert!(user_data != 0, "{}", Error::last_os_error());
-    let lock = user_data as *const std::sync::Mutex<AppState>;
-    let lock = unsafe { &*lock };
-    lock.lock().unwrap()
+    let cell = user_data as *mut std::cell::RefCell<AppState>;
+    unsafe { &mut *cell }
 }
 
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
@@ -700,13 +738,9 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_CREATE => {
             println!("WM_CREATE");
 
-            let mut app_state = AppState::new(hWnd);
-            app_state.update_title();
-            if let Some(path) = std::env::args().nth(1) {
-                load_document(&mut app_state, PathBuf::from(path));
-            }
+            let app_state = AppState::new(hWnd);
 
-            let user_data = Box::into_raw(Box::new(std::sync::Mutex::new(app_state)));
+            let user_data = Box::into_raw(Box::new(std::cell::RefCell::new(app_state)));
             let user_data = user_data as isize;
 
             let old_user_data = SetWindowLongPtrW(hWnd, GWLP_USERDATA, user_data);
@@ -714,14 +748,23 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let e = Error::last_os_error();
             assert!(e.raw_os_error() == Some(0), "{}", e);
 
+            let app_state = get_app_state(hWnd);
+            app_state.borrow_mut().update_title();
+            if let Some(path) = std::env::args().nth(1) {
+                load_document(app_state, PathBuf::from(path));
+            }
+
             0
         }
         WM_NCDESTROY => {
             println!("WM_NCDESTROY");
 
+            // just to ensure nobody is borrowing it at the moment
+            get_app_state(hWnd).borrow_mut();
+
             let user_data = GetWindowLongPtrW(hWnd, GWLP_USERDATA);
             assert!(user_data != 0, "{}", Error::last_os_error());
-            let app_state = Box::from_raw(user_data as *mut std::sync::Mutex<AppState>);
+            let app_state = Box::from_raw(user_data as *mut std::cell::RefCell<AppState>);
             drop(app_state);
 
             PostQuitMessage(0);
@@ -729,8 +772,9 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_CLOSE => {
             println!("WM_CLOSE");
-            let app_state =  &mut *get_app_state(hWnd);
-            if !app_state.view_state.modified() ||
+            let app_state = get_app_state(hWnd);
+            let modified = app_state.borrow_mut().view_state.modified();
+            if !modified ||
                prompt_about_unsaved_changes(app_state) {
                 DestroyWindow(hWnd);
             }
@@ -738,30 +782,27 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_PAINT => {
             println!("WM_PAINT");
-            let app_state =  &mut *get_app_state(hWnd);
-            paint(app_state);
-            let ret = ValidateRect(hWnd, null());
-            assert!(ret != 0);
-
-            match app_state.flash.take() {
-                Some(s) => {
-                    println!("flash");
-                    MessageBoxW(
-                        hWnd,
-                        win32_string(&s).as_ptr(),
-                        win32_string("an editor").as_ptr(),
-                        MB_OK | MB_ICONINFORMATION);
-                }
-                None => {}
+            let app_state = get_app_state(hWnd);
+            let flash = {
+                let mut app_state = app_state.borrow_mut();
+                paint(&mut *app_state);
+                let ret = ValidateRect(hWnd, null());
+                assert!(ret != 0);
+                app_state.flash.take()
+            };
+            if let Some(s) = flash {
+                println!("flash");
+                message_box(app_state, "an editor", &s, MB_OK | MB_ICONINFORMATION);
             }
 
             0
         }
         WM_SIZE => {
             println!("WM_SIZE");
-            let app_state =  &mut *get_app_state(hWnd);
-            let resources = &app_state.resources;
-            let view_state = &mut app_state.view_state;
+            let mut g = get_app_state(hWnd).borrow_mut();
+            let a = &mut *g;
+            let resources = &a.resources;
+            let view_state = &mut a.view_state;
 
             let render_size = D2D_SIZE_U {
                 width: GET_X_LPARAM(lParam) as u32,
@@ -781,7 +822,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONDOWN => {
             println!("WM_LBUTTONDOWN");
-            let app_state =  &mut *get_app_state(hWnd);
+            let mut app_state = get_app_state(hWnd).borrow_mut();
 
             app_state.left_button_pressed = true;
             let x = GET_X_LPARAM(lParam);
@@ -798,7 +839,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONUP => {
             println!("WM_LBUTTONUP");
-            let app_state =  &mut *get_app_state(hWnd);
+            let mut app_state = get_app_state(hWnd).borrow_mut();
             app_state.left_button_pressed = false;
             let res = ReleaseCapture();
             assert!(res != 0);
@@ -806,7 +847,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_MOUSEMOVE => {
             // println!("WM_MOUSEMOVE");
-            let app_state =  &mut *get_app_state(hWnd);
+            let mut app_state =  get_app_state(hWnd).borrow_mut();
             if app_state.left_button_pressed {
                 let x = GET_X_LPARAM(lParam);
                 let y = GET_Y_LPARAM(lParam);
@@ -826,7 +867,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 0);
             assert!(res != 0);
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
-            let app_state =  &mut *get_app_state(hWnd);
+            let mut app_state = get_app_state(hWnd).borrow_mut();
             app_state.view_state.scroll(delta);
             invalidate_rect(app_state.hwnd);
             0
@@ -835,7 +876,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 || wParam == 9 /* tab */ {
-                let app_state =  &mut *get_app_state(hWnd);
+                let mut app_state = get_app_state(hWnd).borrow_mut();
                 if app_state.last_action != ActionType::InsertChar {
                     app_state.view_state.make_undo_snapshot();
                     app_state.last_action = ActionType::InsertChar;
@@ -850,7 +891,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {}", wParam);
             let key_code = wParam as i32;
             let scan_code = ((lParam >> 16) & 511) as i32;
-            let app_state =  &mut *get_app_state(hWnd);
+            let app_state =  get_app_state(hWnd);
             handle_keydown(app_state, key_code, scan_code);
             0
         }
@@ -891,16 +932,16 @@ fn panic_hook(pi: &std::panic::PanicInfo) {
         // will be reentered and fail attempting to grab app_state.
         // To prevent this, we replace our window proc with the default one.
         let res = unsafe {
-            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, DefWindowProcW as _)
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, DefWindowProcW as isize)
         };
         assert!(res != 0, "{}", Error::last_os_error());
     }
 
     unsafe {
-        MessageBoxW(
+        message_box_raw(
             hwnd.unwrap_or(null_mut()),
-            win32_string("A programming error has occurred.\nDiagnostic info is in 'error.txt'").as_ptr(),
-            win32_string("an editor - error").as_ptr(),
+            "an editor - error",
+            "A programming error has occurred.\nDiagnostic info is in 'error.txt'",
             MB_OK | MB_ICONERROR);
     }
 
