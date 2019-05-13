@@ -728,8 +728,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_CLOSE => {
-            let app_state =  &mut *get_app_state(hWnd);
             println!("WM_CLOSE");
+            let app_state =  &mut *get_app_state(hWnd);
             if !app_state.view_state.modified() ||
                prompt_about_unsaved_changes(app_state) {
                 DestroyWindow(hWnd);
@@ -882,21 +882,44 @@ fn panic_hook(pi: &std::panic::PanicInfo) {
     println!("{}", message);
     std::fs::write("error.txt", message).unwrap();
 
+    let hwnd = unsafe { STATIC_HWND };
+    if let Some(hwnd) = hwnd {
+        // The panic was likely thrown from inside window procedure.
+        // The stack was not unwound yet, so we are likely holding app_state.
+        // We can't simply call MessageBox here, because while it's open,
+        // it will dispatch messages such as WM_MOUSEMOVE and window procedure
+        // will be reentered and fail attempting to grab app_state.
+        // To prevent this, we replace our window proc with the default one.
+        let res = unsafe {
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, DefWindowProcW as _)
+        };
+        assert!(res != 0, "{}", Error::last_os_error());
+    }
+
     unsafe {
         MessageBoxW(
-            null_mut(),  // hwnd
+            hwnd.unwrap_or(null_mut()),
             win32_string("A programming error has occurred.\nDiagnostic info is in 'error.txt'").as_ptr(),
             win32_string("an editor - error").as_ptr(),
             MB_OK | MB_ICONERROR);
     }
 
+    if let Some(hwnd) = hwnd {
+        let res = unsafe { DestroyWindow(hwnd) };
+        assert!(res != 0, "{}", Error::last_os_error());
+    }
+
     std::process::exit(1);
 }
 
+static mut STATIC_HWND: Option<HWND> = None;
+
 fn main() -> Result<(), Error> {
     std::panic::set_hook(Box::new(panic_hook));
-
-    let _hwnd = create_window("an_editor", "window title")?;
+    let hwnd = create_window("an_editor", "window title")?;
+    unsafe {
+        STATIC_HWND = Some(hwnd);
+    }
     loop {
         unsafe {
             let mut message: MSG = mem::uninitialized();
