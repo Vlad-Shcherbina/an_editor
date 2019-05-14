@@ -969,7 +969,7 @@ fn panic_hook(pi: &std::panic::PanicInfo) {
         // will be reentered and fail attempting to grab app_state.
         // To prevent this, we replace our window proc with the default one.
         let res = unsafe {
-            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, DefWindowProcW as isize)
+            SetWindowLongPtrW(hwnd, GWLP_WNDPROC, DefWindowProcW as usize as isize)
         };
         assert!(res != 0, "{}", Error::last_os_error());
     }
