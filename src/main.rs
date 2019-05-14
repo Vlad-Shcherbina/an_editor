@@ -116,6 +116,8 @@ struct AppState {
 
     left_button_pressed: bool,
     last_action: ActionType,
+
+    menu: HMENU,
 }
 
 impl AppState {
@@ -168,6 +170,8 @@ impl AppState {
 
             left_button_pressed: false,
             last_action: ActionType::Other,
+
+            menu: create_app_menu(),
         }
     }
 
@@ -759,6 +763,91 @@ fn get_app_state<'a>(hwnd: HWND) -> &'a mut RefCell<AppState> {
     unsafe { &mut *cell }
 }
 
+// mut app_state is passed to ensure that it's not borrowed at the time,
+// for window proc reentrancy
+fn set_menu(app_state: &mut RefCell<AppState>, menu: HMENU) {
+    let hwnd = app_state.borrow_mut().hwnd;
+    let res = unsafe { SetMenu(hwnd, menu) };
+    assert!(res != 0, "{}", Error::last_os_error());
+}
+
+fn create_menu() -> HMENU {
+    let menu = unsafe { CreateMenu() };
+    assert!(!menu.is_null(), "{}", Error::last_os_error());
+    menu
+}
+
+fn append_menu_string(menu: HMENU, id: u16, text: &str) {
+    let res = unsafe {
+        AppendMenuW(menu, MF_STRING, id as usize, win32_string(text).as_ptr())
+    };
+    assert!(res != 0, "{}", Error::last_os_error());
+}
+
+fn append_menu_popup(menu: HMENU, submenu: HMENU, text: &str) {
+    let res = unsafe {
+        AppendMenuW(menu, MF_POPUP, submenu as usize, win32_string(text).as_ptr())
+    };
+    assert!(res != 0, "{}", Error::last_os_error());
+}
+
+fn append_menu_separator(menu: HMENU) {
+    let res = unsafe {
+        AppendMenuW(menu, MF_SEPARATOR, 0, null())
+    };
+    assert!(res != 0, "{}", Error::last_os_error());
+}
+
+fn enable_or_disable_menu_item(menu: HMENU, id: u16, enable: bool) {
+    let res = unsafe {
+        EnableMenuItem(menu, u32::from(id), if enable { MF_ENABLED } else { MF_GRAYED })
+    };
+    assert!(res != -1);
+}
+
+enum Idm {
+    Open = 1,
+    Save,
+    Exit,
+    Undo,
+    Redo,
+    Cut,
+    Copy,
+    Paste,
+    SelectAll,
+}
+
+fn create_app_menu() -> HMENU {
+    let file_menu = create_menu();
+    append_menu_string(file_menu, Idm::Open as u16, "&Open\tCtrl-O");
+    append_menu_string(file_menu, Idm::Save as u16, "&Save\tCtrl-S");
+    append_menu_separator(file_menu);
+    append_menu_string(file_menu, Idm::Exit as u16, "&Exit\tAlt-F4");
+    let edit_menu = create_menu();
+    append_menu_string(edit_menu, Idm::Undo as u16, "&Undo\tCtrl-Z");
+    append_menu_string(edit_menu, Idm::Redo as u16, "&Redo\tCtrl-Y");
+    append_menu_separator(edit_menu);
+    append_menu_string(edit_menu, Idm::Cut as u16, "&Cut\tCtrl-X or Shift-Del");
+    append_menu_string(edit_menu, Idm::Copy as u16, "&Copy\tCtrl-C or Ctrl-Ins");
+    append_menu_string(edit_menu, Idm::Paste as u16, "&Paste\tCtrl-V or Shift-Ins");
+    append_menu_separator(edit_menu);
+    append_menu_string(edit_menu, Idm::SelectAll as u16, "&Select all\tCtrl-A");
+    let menu = create_menu();
+    append_menu_popup(menu, file_menu, "&File");
+    append_menu_popup(menu, edit_menu, "&Edit");
+
+    // TODO
+    enable_or_disable_menu_item(menu, Idm::Open as u16, false);
+    enable_or_disable_menu_item(menu, Idm::Save as u16, false);
+    enable_or_disable_menu_item(menu, Idm::Undo as u16, false);
+    enable_or_disable_menu_item(menu, Idm::Redo as u16, false);
+    enable_or_disable_menu_item(menu, Idm::Cut as u16, false);
+    enable_or_disable_menu_item(menu, Idm::Copy as u16, false);
+    enable_or_disable_menu_item(menu, Idm::Paste as u16, false);
+    enable_or_disable_menu_item(menu, Idm::SelectAll as u16, false);
+    menu
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
@@ -777,6 +866,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             assert!(e.raw_os_error() == Some(0), "{}", e);
 
             let app_state = get_app_state(hWnd);
+            let menu = app_state.borrow_mut().menu;
+            set_menu(app_state, menu);
             app_state.borrow_mut().update_title();
             if let Some(path) = std::env::args().nth(1) {
                 load_document(app_state, PathBuf::from(path));
@@ -845,6 +936,17 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
 
                 let size = resources.render_target.GetSize();
                 view_state.resize(size.width - PADDING_LEFT, size.height);
+            }
+            0
+        }
+        WM_COMMAND => {
+            println!("WM_COMMAND");
+            if HIWORD(wParam as u32) == 0 {
+                let id = LOWORD(wParam as u32);
+                if id == Idm::Exit as u16 {
+                    let res = PostMessageW(hWnd, WM_CLOSE, 0, 0);
+                    assert!(res != 0, "{}", Error::last_os_error());
+                }
             }
             0
         }
