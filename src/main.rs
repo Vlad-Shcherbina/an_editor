@@ -370,9 +370,7 @@ enum FileDialogType {
     SaveAs,
 }
 
-// mut app_state is passed to ensure that it's not borrowed at the time,
-// for window proc reentrancy
-fn file_dialog(app_state: &mut RefCell<AppState>, tp: FileDialogType) -> Option<PathBuf> {
+fn file_dialog(app_state: &mut Token<AppState>, tp: FileDialogType) -> Option<PathBuf> {
     let hwnd = app_state.borrow_mut().hwnd;
     let mut buf: Vec<u16> = vec![0 as u16; 1024];
     let mut d = OPENFILENAMEW {
@@ -437,10 +435,8 @@ unsafe fn message_box_raw(hwnd: HWND, title: &str, message: &str, u_type: UINT) 
     res
 }
 
-// mut app_state is passed to ensure that it's not borrowed at the time,
-// for window proc reentrancy
 fn message_box(
-    app_state: &mut RefCell<AppState>,
+    app_state: &mut Token<AppState>,
     title: &str,
     message: &str,
     u_type: UINT,
@@ -451,7 +447,7 @@ fn message_box(
     }
 }
 
-fn load_document(app_state: &mut RefCell<AppState>, path: PathBuf) {
+fn load_document(app_state: &mut Token<AppState>, path: PathBuf) {
     match std::fs::read_to_string(&path) {
         Ok(mut content) => {
             let mut app_state = app_state.borrow_mut();
@@ -479,7 +475,7 @@ fn load_document(app_state: &mut RefCell<AppState>, path: PathBuf) {
     }
 }
 
-fn save_document(app_state: &mut RefCell<AppState>, path: PathBuf) -> bool {
+fn save_document(app_state: &mut Token<AppState>, path: PathBuf) -> bool {
     let mut g = app_state.borrow_mut();
     let content: String = g.view_state.content();
     match std::fs::write(&path, content) {
@@ -500,7 +496,7 @@ fn save_document(app_state: &mut RefCell<AppState>, path: PathBuf) -> bool {
 
 // Returns true if it's ok to proceed
 // (that is, the changes were saved or the user chose to abandon them).
-fn prompt_about_unsaved_changes(app_state: &mut RefCell<AppState>) -> bool {
+fn prompt_about_unsaved_changes(app_state: &mut Token<AppState>) -> bool {
     let res = message_box(
         app_state,
         "an editor - unsaved changes",
@@ -534,7 +530,7 @@ fn prompt_about_unsaved_changes(app_state: &mut RefCell<AppState>) -> bool {
     false
 }
 
-fn handle_keydown(app_state: &mut RefCell<AppState>, key_code: i32, scan_code: i32) {
+fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32) {
     let mut g = app_state.borrow_mut();
     let a = &mut *g;
     let view_state = &mut a.view_state;
@@ -753,19 +749,34 @@ fn handle_keydown(app_state: &mut RefCell<AppState>, key_code: i32, scan_code: i
     a.update_title();
 }
 
-// Don't use .get_mut() on it, use .borrow_mut().
-// We still use runtime check because not all ways window proc
-// can be reentered are annotated like message_box().
-fn get_app_state<'a>(hwnd: HWND) -> &'a mut RefCell<AppState> {
-    let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
-    assert!(user_data != 0, "{}", Error::last_os_error());
-    let cell = user_data as *mut std::cell::RefCell<AppState>;
-    unsafe { &mut *cell }
+// This is a safe-ish abstraction around window proc reentrancy
+// and global app state.
+// If a WinAPI call is known to send messages, wrap it in a function
+// that takes &mut Token. This will statically ensure there are no
+// active borrows on the app state.
+// And even if one misses some of such WinAPI calls, that's no problem,
+// it will be caught by RefCell at runtime.
+struct Token<AppState: 'static>(&'static RefCell<AppState>);
+
+impl<AppState> Token<AppState> {
+    fn new(cell: *const RefCell<AppState>) -> Self {
+        Self(unsafe { &*cell })
+    }
+
+    pub fn borrow_mut(&mut self)
+    -> impl std::ops::Deref<Target=AppState> + std::ops::DerefMut<Target=AppState> {
+        self.0.borrow_mut()
+    }
 }
 
-// mut app_state is passed to ensure that it's not borrowed at the time,
-// for window proc reentrancy
-fn set_menu(app_state: &mut RefCell<AppState>, menu: HMENU) {
+fn get_app_state<'a>(hwnd: HWND) -> Token<AppState> {
+    let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
+    assert!(user_data != 0, "{}", Error::last_os_error());
+    let cell = user_data as *const std::cell::RefCell<AppState>;
+    Token::new(cell)
+}
+
+fn set_menu(app_state: &mut Token<AppState>, menu: HMENU) {
     let hwnd = app_state.borrow_mut().hwnd;
     let res = unsafe { SetMenu(hwnd, menu) };
     assert!(res != 0, "{}", Error::last_os_error());
@@ -865,7 +876,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let e = Error::last_os_error();
             assert!(e.raw_os_error() == Some(0), "{}", e);
 
-            let app_state = get_app_state(hWnd);
+            let app_state = &mut get_app_state(hWnd);
             let menu = app_state.borrow_mut().menu;
             set_menu(app_state, menu);
             app_state.borrow_mut().update_title();
@@ -891,7 +902,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_CLOSE => {
             println!("WM_CLOSE");
-            let app_state = get_app_state(hWnd);
+            let app_state = &mut get_app_state(hWnd);
             let modified = app_state.borrow_mut().view_state.modified();
             if !modified ||
                prompt_about_unsaved_changes(app_state) {
@@ -901,7 +912,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_PAINT => {
             println!("WM_PAINT");
-            let app_state = get_app_state(hWnd);
+            let app_state = &mut get_app_state(hWnd);
             let flash = {
                 let mut app_state = app_state.borrow_mut();
                 paint(&mut *app_state);
@@ -918,7 +929,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_SIZE => {
             println!("WM_SIZE");
-            let mut g = get_app_state(hWnd).borrow_mut();
+            let app_state = &mut get_app_state(hWnd);
+            let mut g = app_state.borrow_mut();
             let a = &mut *g;
             let resources = &a.resources;
             let view_state = &mut a.view_state;
@@ -952,7 +964,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONDOWN => {
             println!("WM_LBUTTONDOWN");
-            let mut app_state = get_app_state(hWnd).borrow_mut();
+            let app_state = &mut get_app_state(hWnd);
+            let mut app_state = app_state.borrow_mut();
 
             app_state.left_button_pressed = true;
             let x = GET_X_LPARAM(lParam);
@@ -969,7 +982,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONUP => {
             println!("WM_LBUTTONUP");
-            let mut app_state = get_app_state(hWnd).borrow_mut();
+            let app_state = &mut get_app_state(hWnd);
+            let mut app_state = app_state.borrow_mut();
             app_state.left_button_pressed = false;
             let res = ReleaseCapture();
             assert!(res != 0);
@@ -977,7 +991,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_LBUTTONDBLCLK => {
             println!("WM_LBUTTONDBLCLK");
-            let mut app_state =  get_app_state(hWnd).borrow_mut();
+            let app_state = &mut get_app_state(hWnd);
+            let mut app_state = app_state.borrow_mut();
             let x = GET_X_LPARAM(lParam);
             let y = GET_Y_LPARAM(lParam);
             app_state.view_state.double_click(x as f32 - PADDING_LEFT, y as f32);
@@ -986,7 +1001,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_MOUSEMOVE => {
             // println!("WM_MOUSEMOVE");
-            let mut app_state =  get_app_state(hWnd).borrow_mut();
+            let app_state = &mut get_app_state(hWnd);
+            let mut app_state = app_state.borrow_mut();
             if app_state.left_button_pressed {
                 let x = GET_X_LPARAM(lParam);
                 let y = GET_Y_LPARAM(lParam);
@@ -1006,7 +1022,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 0);
             assert!(res != 0);
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
-            let mut app_state = get_app_state(hWnd).borrow_mut();
+            let app_state = &mut get_app_state(hWnd);
+            let mut app_state = app_state.borrow_mut();
             app_state.view_state.scroll(delta);
             invalidate_rect(app_state.hwnd);
             0
@@ -1015,7 +1032,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let c: char = std::char::from_u32(wParam as u32).unwrap();
             println!("WM_CHAR {:?}", c);
             if wParam >= 32 || wParam == 9 /* tab */ {
-                let mut app_state = get_app_state(hWnd).borrow_mut();
+                let app_state = &mut get_app_state(hWnd);
+                let mut app_state = app_state.borrow_mut();
                 if app_state.last_action != ActionType::InsertChar {
                     app_state.view_state.make_undo_snapshot();
                     app_state.last_action = ActionType::InsertChar;
@@ -1030,7 +1048,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {}", wParam);
             let key_code = wParam as i32;
             let scan_code = ((lParam >> 16) & 511) as i32;
-            let app_state =  get_app_state(hWnd);
+            let app_state = &mut get_app_state(hWnd);
             handle_keydown(app_state, key_code, scan_code);
             0
         }
