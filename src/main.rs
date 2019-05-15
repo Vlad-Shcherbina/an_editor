@@ -600,20 +600,16 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
                 return;
             }
             0x2c => {  // ctrl-Z
-                a.last_action = ActionType::Other;
-                view_state.undo();
-                invalidate_rect(a.hwnd);
-                a.update_title();
+                drop(g);
+                send_message(app_state, WM_COMMAND, Idm::Undo as usize, 0);
                 return;
             }
             _ => {}
         }
         match key_code {
             89 => {  // ord('Y')
-                a.last_action = ActionType::Other;
-                view_state.redo();
-                invalidate_rect(a.hwnd);
-                a.update_title();
+                drop(g);
+                send_message(app_state, WM_COMMAND, Idm::Redo as usize, 0);
                 return;
             }
             65 => {  // ord('A')
@@ -828,8 +824,6 @@ fn create_app_menu() -> HMENU {
     append_menu_popup(menu, edit_menu, "&Edit");
 
     // TODO
-    enable_or_disable_menu_item(menu, Idm::Undo as u16, false);
-    enable_or_disable_menu_item(menu, Idm::Redo as u16, false);
     enable_or_disable_menu_item(menu, Idm::Cut as u16, false);
     enable_or_disable_menu_item(menu, Idm::Copy as u16, false);
     enable_or_disable_menu_item(menu, Idm::Paste as u16, false);
@@ -970,6 +964,20 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                             }
                         }
                     }
+                } else if id == Idm::Undo as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    a.last_action = ActionType::Other;
+                    a.view_state.undo();
+                    invalidate_rect(a.hwnd);
+                    a.update_title();
+                } else if id == Idm::Redo as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    a.last_action = ActionType::Other;
+                    a.view_state.redo();
+                    invalidate_rect(a.hwnd);
+                    a.update_title();
                 } else {
                     panic!("{}", id);
                 }
