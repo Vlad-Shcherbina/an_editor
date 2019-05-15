@@ -530,6 +530,13 @@ fn prompt_about_unsaved_changes(app_state: &mut Token<AppState>) -> bool {
     false
 }
 
+fn send_message(app_state: &mut Token<AppState>, msg: UINT, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
+    let hwnd = app_state.borrow_mut().hwnd;
+    unsafe {
+        SendMessageW(hwnd, msg, w_param, l_param)
+    }
+}
+
 fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32) {
     let mut g = app_state.borrow_mut();
     let a = &mut *g;
@@ -616,40 +623,13 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
                 return;
             }
             83 => {  // ord('S')
-                match &a.filename {
-                    Some(path) => {
-                        if a.view_state.modified() {
-                            let path = path.clone();
-                            drop(g);
-                            save_document(app_state, path);
-                            app_state.borrow_mut().update_title();
-                        }
-                    }
-                    None => {
-                        drop(g);
-                        if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
-                            save_document(app_state, path);
-                            let mut g = app_state.borrow_mut();
-                            g.view_state.set_unmodified_snapshot();
-                            g.update_title();
-                        }
-                    }
-                }
+                drop(g);
+                send_message(app_state, WM_COMMAND, Idm::Save as usize, 0);
                 return;
             }
             79 => {  // ord('O')
-                let modified = g.view_state.modified();
                 drop(g);
-                if !modified ||
-                    prompt_about_unsaved_changes(app_state) {
-
-                    if let Some(path) = file_dialog(app_state, FileDialogType::Open) {
-                        load_document(app_state, path);
-                        let app_state = app_state.borrow_mut();
-                        invalidate_rect(app_state.hwnd);
-                        app_state.update_title();
-                    }
-                }
+                send_message(app_state, WM_COMMAND, Idm::Open as usize, 0);
                 return;
             }
             _ => {}
@@ -769,7 +749,7 @@ impl<AppState> Token<AppState> {
     }
 }
 
-fn get_app_state<'a>(hwnd: HWND) -> Token<AppState> {
+fn get_app_state(hwnd: HWND) -> Token<AppState> {
     let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     assert!(user_data != 0, "{}", Error::last_os_error());
     let cell = user_data as *const std::cell::RefCell<AppState>;
@@ -848,8 +828,6 @@ fn create_app_menu() -> HMENU {
     append_menu_popup(menu, edit_menu, "&Edit");
 
     // TODO
-    enable_or_disable_menu_item(menu, Idm::Open as u16, false);
-    enable_or_disable_menu_item(menu, Idm::Save as u16, false);
     enable_or_disable_menu_item(menu, Idm::Undo as u16, false);
     enable_or_disable_menu_item(menu, Idm::Redo as u16, false);
     enable_or_disable_menu_item(menu, Idm::Cut as u16, false);
@@ -954,10 +932,46 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_COMMAND => {
             println!("WM_COMMAND");
             if HIWORD(wParam as u32) == 0 {
+                let app_state = &mut get_app_state(hWnd);
                 let id = LOWORD(wParam as u32);
                 if id == Idm::Exit as u16 {
                     let res = PostMessageW(hWnd, WM_CLOSE, 0, 0);
                     assert!(res != 0, "{}", Error::last_os_error());
+                } else if id == Idm::Open as u16 {
+                    let modified = app_state.borrow_mut().view_state.modified();
+                    if !modified ||
+                        prompt_about_unsaved_changes(app_state) {
+                        if let Some(path) = file_dialog(app_state, FileDialogType::Open) {
+                            load_document(app_state, path);
+                            let app_state = app_state.borrow_mut();
+                            invalidate_rect(app_state.hwnd);
+                            app_state.update_title();
+                        }
+                    }
+                } else if id == Idm::Save as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    match &a.filename {
+                        Some(path) => {
+                            if a.view_state.modified() {
+                                let path = path.clone();
+                                drop(g);
+                                save_document(app_state, path);
+                                app_state.borrow_mut().update_title();
+                            }
+                        }
+                        None => {
+                            drop(g);
+                            if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
+                                save_document(app_state, path);
+                                let mut g = app_state.borrow_mut();
+                                g.view_state.set_unmodified_snapshot();
+                                g.update_title();
+                            }
+                        }
+                    }
+                } else {
+                    panic!("{}", id);
                 }
             }
             0
