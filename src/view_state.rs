@@ -112,6 +112,10 @@ impl ViewState {
         }
     }
 
+    pub fn can_undo(&self) -> bool {
+        !self.undo_snapshots.is_empty()
+    }
+
     pub fn undo(&mut self) {
         if let Some(UndoSnapshot { slice_edit_count, cursor_pos }) = self.undo_snapshots.pop() {
             self.redo_snapshots.push(UndoSnapshot {
@@ -128,6 +132,10 @@ impl ViewState {
             self.clear_selection();
         }
         self.ensure_cursor_on_screen();
+    }
+
+    pub fn can_redo(&self) -> bool {
+        !self.redo_snapshots.is_empty()
     }
 
     pub fn redo(&mut self) {
@@ -187,6 +195,10 @@ impl ViewState {
         self.cursor_pos += s.len();
         self.clear_selection();
         self.ensure_cursor_on_screen();
+    }
+
+    pub fn has_selection(&self) -> bool {
+        self.cursor_pos != self.selection_pos
     }
 
     pub fn get_selection(&self) -> String {

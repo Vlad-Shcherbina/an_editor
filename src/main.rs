@@ -795,6 +795,29 @@ fn create_app_menu() -> HMENU {
     menu
 }
 
+fn enable_available_menu_items(app_state: &mut AppState) {
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::Save as u16,
+        app_state.filename.is_none() || app_state.view_state.modified());
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::Undo as u16,
+        app_state.view_state.can_undo());
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::Redo as u16,
+        app_state.view_state.can_redo());
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::Cut as u16,
+        app_state.view_state.has_selection());
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::Copy as u16,
+        app_state.view_state.has_selection());
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
@@ -885,6 +908,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let size = resources.render_target.GetSize();
                 view_state.resize(size.width - PADDING_LEFT, size.height);
             }
+            0
+        }
+        WM_ENTERMENULOOP => {
+            println!("WM_ENTERMENULOOP");
+            let app_state = &mut get_app_state(hWnd);
+            enable_available_menu_items(&mut app_state.borrow_mut());
             0
         }
         WM_COMMAND => {
