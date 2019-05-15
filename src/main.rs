@@ -538,36 +538,20 @@ fn send_message(app_state: &mut Token<AppState>, msg: UINT, w_param: WPARAM, l_p
 }
 
 fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32) {
-    let mut g = app_state.borrow_mut();
-    let a = &mut *g;
-    let view_state = &mut a.view_state;
-
     let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
     let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
 
     match key_code {
-        VK_DELETE if shift_pressed => {  // shift-del (cut)
-            a.last_action = ActionType::Other;
-            view_state.make_undo_snapshot();
-            let s = view_state.cut_selection();
-            set_clipboard(a.hwnd, &s);
-            invalidate_rect(a.hwnd);
-            a.update_title();
+        VK_DELETE if shift_pressed => {  // shift-del
+            send_message(app_state, WM_COMMAND, Idm::Cut as usize, 0);
             return;
         }
         VK_INSERT if ctrl_pressed && !shift_pressed => {  // ctrl-ins (copy)
-            a.last_action = ActionType::Other;
-            let s = view_state.get_selection();
-            set_clipboard(a.hwnd, &s);
+            send_message(app_state, WM_COMMAND, Idm::Copy as usize, 0);
             return;
         }
         VK_INSERT if shift_pressed && !ctrl_pressed => {  // shift-ins (paste)
-            a.last_action = ActionType::Other;
-            view_state.make_undo_snapshot();
-            let s = get_clipboard(a.hwnd);
-            view_state.paste(&s);
-            invalidate_rect(a.hwnd);
-            a.update_title();
+            send_message(app_state, WM_COMMAND, Idm::Paste as usize, 0);
             return;
         }
         _ => {}
@@ -576,31 +560,18 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
     if ctrl_pressed {
         match scan_code {
             0x2d => {  // ctrl-X
-                a.last_action = ActionType::Other;
-                view_state.make_undo_snapshot();
-                let s = view_state.cut_selection();
-                set_clipboard(a.hwnd, &s);
-                invalidate_rect(a.hwnd);
-                a.update_title();
+                send_message(app_state, WM_COMMAND, Idm::Cut as usize, 0);
                 return;
             }
             0x2e => {  // ctrl-C
-                a.last_action = ActionType::Other;
-                let s = view_state.get_selection();
-                set_clipboard(a.hwnd, &s);
+                send_message(app_state, WM_COMMAND, Idm::Copy as usize, 0);
                 return;
             }
             0x2f => {  // ctrl-V
-                a.last_action = ActionType::Other;
-                view_state.make_undo_snapshot();
-                let s = get_clipboard(a.hwnd);
-                view_state.paste(&s);
-                invalidate_rect(a.hwnd);
-                a.update_title();
+                send_message(app_state, WM_COMMAND, Idm::Paste as usize, 0);
                 return;
             }
             0x2c => {  // ctrl-Z
-                drop(g);
                 send_message(app_state, WM_COMMAND, Idm::Undo as usize, 0);
                 return;
             }
@@ -608,29 +579,28 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
         }
         match key_code {
             89 => {  // ord('Y')
-                drop(g);
                 send_message(app_state, WM_COMMAND, Idm::Redo as usize, 0);
                 return;
             }
             65 => {  // ord('A')
-                a.last_action = ActionType::Other;
-                view_state.select_all();
-                invalidate_rect(a.hwnd);
+                send_message(app_state, WM_COMMAND, Idm::SelectAll as usize, 0);
                 return;
             }
             83 => {  // ord('S')
-                drop(g);
                 send_message(app_state, WM_COMMAND, Idm::Save as usize, 0);
                 return;
             }
             79 => {  // ord('O')
-                drop(g);
                 send_message(app_state, WM_COMMAND, Idm::Open as usize, 0);
                 return;
             }
             _ => {}
         }
     }
+
+    let mut g = app_state.borrow_mut();
+    let a = &mut *g;
+    let view_state = &mut a.view_state;
 
     let mut regular_movement_cmd = true;
     match key_code {
@@ -822,12 +792,6 @@ fn create_app_menu() -> HMENU {
     let menu = create_menu();
     append_menu_popup(menu, file_menu, "&File");
     append_menu_popup(menu, edit_menu, "&Edit");
-
-    // TODO
-    enable_or_disable_menu_item(menu, Idm::Cut as u16, false);
-    enable_or_disable_menu_item(menu, Idm::Copy as u16, false);
-    enable_or_disable_menu_item(menu, Idm::Paste as u16, false);
-    enable_or_disable_menu_item(menu, Idm::SelectAll as u16, false);
     menu
 }
 
@@ -978,6 +942,36 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     a.view_state.redo();
                     invalidate_rect(a.hwnd);
                     a.update_title();
+                } else if id == Idm::Cut as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    a.last_action = ActionType::Other;
+                    a.view_state.make_undo_snapshot();
+                    let s = a.view_state.cut_selection();
+                    set_clipboard(a.hwnd, &s);
+                    invalidate_rect(a.hwnd);
+                    a.update_title();
+                } else if id == Idm::Copy as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    a.last_action = ActionType::Other;
+                    let s = a.view_state.get_selection();
+                    set_clipboard(a.hwnd, &s);
+                } else if id == Idm::Paste as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    a.last_action = ActionType::Other;
+                    a.view_state.make_undo_snapshot();
+                    let s = get_clipboard(a.hwnd);
+                    a.view_state.paste(&s);
+                    invalidate_rect(a.hwnd);
+                    a.update_title();
+                } else if id == Idm::SelectAll as u16 {
+                    let mut g = app_state.borrow_mut();
+                    let a = &mut *g;
+                    a.last_action = ActionType::Other;
+                    a.view_state.select_all();
+                    invalidate_rect(a.hwnd);
                 } else {
                     panic!("{}", id);
                 }
