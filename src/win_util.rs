@@ -7,11 +7,9 @@ use std::path::PathBuf;
 
 use winapi::shared::minwindef::*;
 use winapi::shared::windef::*;
-use winapi::shared::winerror::*;
 use winapi::um::libloaderapi::GetModuleHandleW;
 use winapi::um::winbase::*;
 use winapi::um::winuser::*;
-use winapi::um::errhandlingapi::*;
 use winapi::um::commdlg::*;
 use winapi::ctypes::*;
 
@@ -124,8 +122,12 @@ fn cast_ptr<T1, T2>(p: *mut T1) -> *mut T2 {
 pub fn get_clipboard(hwnd: HWND) -> String {
     unsafe {
         let res = OpenClipboard(hwnd);
-        assert!(res != 0);
+        assert!(res != 0, "{}", Error::last_os_error());
         let h = GetClipboardData(CF_UNICODETEXT);
+        if h.is_null() {
+            let e = Error::last_os_error();
+            assert!(e.raw_os_error() == Some(0), "{}", e);
+        }
         let pdata: *mut u16 = cast_ptr(GlobalLock(h));
         assert!(!pdata.is_null());
         let mut data = Vec::new();
@@ -138,10 +140,11 @@ pub fn get_clipboard(hwnd: HWND) -> String {
         let s = s.into_string().unwrap();
         let res = GlobalUnlock(pdata as *mut _);
         if res == 0 {
-            assert!(GetLastError() == NO_ERROR);
+            let e = Error::last_os_error();
+            assert!(e.raw_os_error() == Some(0), "{}", e);
         }
         let res = CloseClipboard();
-        assert!(res != 0);
+        assert!(res != 0, "{}", Error::last_os_error());
         s.replace("\r\n", "\n")
     }
 }
@@ -150,12 +153,12 @@ pub fn set_clipboard(hwnd: HWND, s: &str) {
     let data = win32_string(s);
     unsafe {
         let res = OpenClipboard(hwnd);
-        assert!(res != 0);
+        assert!(res != 0, "{}", Error::last_os_error());
         let res = EmptyClipboard();
-        assert!(res != 0);
+        assert!(res != 0, "{}", Error::last_os_error());
 
         let h = GlobalAlloc(GMEM_MOVEABLE, data.len() * 2);
-        assert!(!h.is_null());
+        assert!(!h.is_null(), "{}", Error::last_os_error());
 
         let pdata: *mut u16 = cast_ptr(GlobalLock(h));
         assert!(!pdata.is_null());
@@ -164,14 +167,15 @@ pub fn set_clipboard(hwnd: HWND, s: &str) {
         }
         let res = GlobalUnlock(pdata as *mut _);
         if res == 0 {
-            assert!(GetLastError() == NO_ERROR);
+            let e = Error::last_os_error();
+            assert!(e.raw_os_error() == Some(0), "{}", e);
         }
 
         let res = SetClipboardData(CF_UNICODETEXT, h);
-        assert!(!res.is_null());
+        assert!(!res.is_null(), "{}", Error::last_os_error());
 
         let res = CloseClipboard();
-        assert!(res != 0);
+        assert!(res != 0, "{}", Error::last_os_error());
     }
 }
 
