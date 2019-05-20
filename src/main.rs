@@ -1,13 +1,10 @@
 #![allow(non_snake_case)]
 // #![windows_subsystem = "windows"]  // prevent console
 
-use std::ffi::{OsStr, OsString};
-use std::os::windows::ffi::{OsStrExt, OsStringExt};
 use std::mem;
 use std::ptr::{null, null_mut};
 use std::io::Error;
 use std::path::PathBuf;
-use std::cell::RefCell;
 
 use winapi::Interface;
 use winapi::shared::minwindef::*;
@@ -15,10 +12,7 @@ use winapi::shared::windef::*;
 use winapi::shared::winerror::*;
 use winapi::shared::dxgiformat::*;
 use winapi::shared::windowsx::*;
-use winapi::um::libloaderapi::GetModuleHandleW;
-use winapi::um::winbase::*;
 use winapi::um::winuser::*;
-use winapi::um::errhandlingapi::*;
 use winapi::um::dcommon::*;
 use winapi::um::d2d1::*;
 use winapi::um::dwrite::*;
@@ -26,75 +20,17 @@ use winapi::um::d2d1::{
     D2D1_SIZE_U,
     D2D1_POINT_2F,
 };
-use winapi::um::commdlg::*;
-use winapi::ctypes::*;
 
 mod com_ptr;
 mod text_layout;
 mod line_gap_buffer;
 mod view_state;
+mod win_util;
 
 use com_ptr::ComPtr;
 use view_state::ViewState;
 
-fn win32_string(value: &str) -> Vec<u16> {
-    OsStr::new(value).encode_wide().chain(Some(0)).collect()
-}
-
-fn create_window(class_name : &str, title : &str) -> Result<HWND, Error> {
-    let class_name = win32_string(class_name);
-    let title = win32_string(title);
-    unsafe {
-        let hInstance = GetModuleHandleW(null_mut());
-        if hInstance.is_null() {
-            Err(Error::last_os_error())?
-        }
-
-        let cursor = LoadCursorW(0 as HINSTANCE, IDC_IBEAM);
-        if cursor.is_null() {
-            Err(Error::last_os_error())?
-        }
-
-        let wnd_class = WNDCLASSW {
-            style : CS_OWNDC | CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS,
-            lpfnWndProc : Some(my_window_proc),
-            lpszClassName : class_name.as_ptr(),
-            hInstance,
-            cbClsExtra : 0,
-            cbWndExtra : 0,
-            hIcon: null_mut(),
-            hCursor: cursor,
-            hbrBackground: null_mut(),
-            lpszMenuName: null_mut(),
-        };
-
-        let class_atom = RegisterClassW(&wnd_class);
-        if class_atom == 0 {
-            Err(Error::last_os_error())?
-        }
-
-        let handle = CreateWindowExW(
-            0,  // dwExStyle
-            class_name.as_ptr(),  // lpClassName
-            title.as_ptr(),  // lpWindowName
-            WS_OVERLAPPEDWINDOW | WS_VISIBLE,  // dwStyle
-            CW_USEDEFAULT,  // x
-            CW_USEDEFAULT,  // y
-            CW_USEDEFAULT,  // nWidth
-            CW_USEDEFAULT,  // nHeight
-            null_mut(),  // hWndParent
-            null_mut(),  // hMenu
-            hInstance,  // hInstance
-            null_mut(),  // lpParam
-        );
-
-        if handle.is_null() {
-            Err(Error::last_os_error())
-        } else {
-            Ok(handle)
-        }
-    }
-}
+use win_util::*;
 
 #[derive(PartialEq, Eq)]
 enum ActionType {
@@ -118,6 +54,12 @@ struct AppState {
     last_action: ActionType,
 
     menu: HMENU,
+}
+
+impl HasHwnd for AppState {
+    fn hwnd(&self) -> HWND {
+        self.hwnd
+    }
 }
 
 impl AppState {
@@ -188,14 +130,8 @@ impl AppState {
     }
 
     fn update_title(&self) {
-        unsafe {
-            let res = SetWindowTextW(
-                self.hwnd,
-                win32_string(&self.get_title()).as_ptr());
-            assert!(res != 0);
-        }
+        set_window_title(self.hwnd, &self.get_title());
     }
-
 }
 
 struct Resources {
@@ -281,13 +217,6 @@ impl Resources {
     }
 }
 
-fn invalidate_rect(hwnd: HWND) {
-    unsafe {
-        let res = InvalidateRect(hwnd, null(), 1);
-        assert!(res != 0);
-    }
-}
-
 const PADDING_LEFT: f32 = 5.0;
 
 fn paint(app_state: &mut AppState) {
@@ -308,142 +237,6 @@ fn paint(app_state: &mut AppState) {
         let hr = rt.EndDraw(null_mut(), null_mut());
         assert!(hr == S_OK, "0x{:x}", hr);
         // TODO: if hr == D2DERR_RECREATE_TARGET, recreate resources
-    }
-}
-
-fn get_clipboard(hwnd: HWND) -> String {
-    unsafe {
-        let res = OpenClipboard(hwnd);
-        assert!(res != 0);
-        let h = GetClipboardData(CF_UNICODETEXT);
-        let pdata = GlobalLock(h) as *mut u16;
-        assert!(!pdata.is_null());
-        let mut data = Vec::new();
-        let mut pos = 0;
-        while *pdata.offset(pos) != 0 {
-            data.push(*pdata.offset(pos));
-            pos += 1;
-        }
-        let s = OsString::from_wide(&data);
-        let s = s.into_string().unwrap();
-        let res = GlobalUnlock(pdata as *mut _);
-        if res == 0 {
-            assert!(GetLastError() == NO_ERROR);
-        }
-        let res = CloseClipboard();
-        assert!(res != 0);
-        s.replace("\r\n", "\n")
-    }
-}
-
-fn set_clipboard(hwnd: HWND, s: &str) {
-    let data = win32_string(s);
-    unsafe {
-        let res = OpenClipboard(hwnd);
-        assert!(res != 0);
-        let res = EmptyClipboard();
-        assert!(res != 0);
-
-        let h = GlobalAlloc(GMEM_MOVEABLE, data.len() * 2);
-        assert!(!h.is_null());
-
-        let pdata = GlobalLock(h) as *mut u16;
-        assert!(!pdata.is_null());
-        for (i, c) in data.into_iter().enumerate() {
-            *pdata.add(i) = c;
-        }
-        let res = GlobalUnlock(pdata as *mut _);
-        if res == 0 {
-            assert!(GetLastError() == NO_ERROR);
-        }
-
-        let res = SetClipboardData(CF_UNICODETEXT, h);
-        assert!(!res.is_null());
-
-        let res = CloseClipboard();
-        assert!(res != 0);
-    }
-}
-
-enum FileDialogType {
-    Open,
-    SaveAs,
-}
-
-fn file_dialog(app_state: &mut Token<AppState>, tp: FileDialogType) -> Option<PathBuf> {
-    let hwnd = app_state.borrow_mut().hwnd;
-    let mut buf: Vec<u16> = vec![0 as u16; 1024];
-    let mut d = OPENFILENAMEW {
-        lStructSize: std::mem::size_of::<OPENFILENAMEW>() as u32,
-        hwndOwner: hwnd,
-        hInstance: null_mut(),
-        lpstrFilter: null(),
-        lpstrCustomFilter: null_mut(),
-        nMaxCustFilter: 0,
-        nFilterIndex: 0,
-        lpstrFile: buf.as_mut_ptr(),
-        nMaxFile: buf.len() as u32,
-        lpstrFileTitle: null_mut(),
-        nMaxFileTitle: 0,
-        lpstrInitialDir: null(),
-        lpstrTitle: null(),
-        Flags: 0,
-        nFileOffset: 0,
-        nFileExtension: 0,
-        lpstrDefExt: null(),
-        lCustData: 0,
-        lpfnHook: None,
-        lpTemplateName: null(),
-        pvReserved: null_mut(),
-        dwReserved: 0,
-        FlagsEx: 0,
-    };
-    let opened = unsafe {
-        let res = match tp {
-            FileDialogType::Open => GetOpenFileNameW(&mut d),
-            FileDialogType::SaveAs => GetSaveFileNameW(&mut d),
-        };
-        if res != 0 {
-            true
-        } else {
-            let e = CommDlgExtendedError();
-            assert!(e == 0, "{}", e);
-            false
-        }
-    };
-    if opened {
-        let mut pos = 0;
-        while buf[pos] != 0 {
-            pos += 1;
-        }
-        Some(OsString::from_wide(&buf[..pos]).into())
-    } else {
-        None
-    }
-}
-
-// Unsafe because one must remember that it's blocking
-// and has its own message loop, so when using from window proc
-// one must ensure reentrancy.
-unsafe fn message_box_raw(hwnd: HWND, title: &str, message: &str, u_type: UINT) -> c_int {
-    let res = MessageBoxW(
-        hwnd,
-        win32_string(message).as_ptr(),
-        win32_string(title).as_ptr(),
-        u_type);
-    assert!(res != 0, "{}", Error::last_os_error());
-    res
-}
-
-fn message_box(
-    app_state: &mut Token<AppState>,
-    title: &str,
-    message: &str,
-    u_type: UINT,
-) -> c_int {
-    let hwnd = app_state.borrow_mut().hwnd;
-    unsafe {
-        message_box_raw(hwnd, title, message, u_type)
     }
 }
 
@@ -528,13 +321,6 @@ fn prompt_about_unsaved_changes(app_state: &mut Token<AppState>) -> bool {
         _ => unreachable!("{}", res),
     }
     false
-}
-
-fn send_message(app_state: &mut Token<AppState>, msg: UINT, w_param: WPARAM, l_param: LPARAM) -> LRESULT {
-    let hwnd = app_state.borrow_mut().hwnd;
-    unsafe {
-        SendMessageW(hwnd, msg, w_param, l_param)
-    }
 }
 
 fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32) {
@@ -703,71 +489,11 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
     a.update_title();
 }
 
-// This is a safe-ish abstraction around window proc reentrancy
-// and global app state.
-// If a WinAPI call is known to send messages, wrap it in a function
-// that takes &mut Token. This will statically ensure there are no
-// active borrows on the app state.
-// And even if one misses some of such WinAPI calls, that's no problem,
-// it will be caught by RefCell at runtime.
-struct Token<AppState: 'static>(&'static RefCell<AppState>);
-
-impl<AppState> Token<AppState> {
-    fn new(cell: *const RefCell<AppState>) -> Self {
-        Self(unsafe { &*cell })
-    }
-
-    pub fn borrow_mut(&mut self)
-    -> impl std::ops::Deref<Target=AppState> + std::ops::DerefMut<Target=AppState> {
-        self.0.borrow_mut()
-    }
-}
-
 fn get_app_state(hwnd: HWND) -> Token<AppState> {
     let user_data = unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) };
     assert!(user_data != 0, "{}", Error::last_os_error());
     let cell = user_data as *const std::cell::RefCell<AppState>;
     Token::new(cell)
-}
-
-fn set_menu(app_state: &mut Token<AppState>, menu: HMENU) {
-    let hwnd = app_state.borrow_mut().hwnd;
-    let res = unsafe { SetMenu(hwnd, menu) };
-    assert!(res != 0, "{}", Error::last_os_error());
-}
-
-fn create_menu() -> HMENU {
-    let menu = unsafe { CreateMenu() };
-    assert!(!menu.is_null(), "{}", Error::last_os_error());
-    menu
-}
-
-fn append_menu_string(menu: HMENU, id: u16, text: &str) {
-    let res = unsafe {
-        AppendMenuW(menu, MF_STRING, id as usize, win32_string(text).as_ptr())
-    };
-    assert!(res != 0, "{}", Error::last_os_error());
-}
-
-fn append_menu_popup(menu: HMENU, submenu: HMENU, text: &str) {
-    let res = unsafe {
-        AppendMenuW(menu, MF_POPUP, submenu as usize, win32_string(text).as_ptr())
-    };
-    assert!(res != 0, "{}", Error::last_os_error());
-}
-
-fn append_menu_separator(menu: HMENU) {
-    let res = unsafe {
-        AppendMenuW(menu, MF_SEPARATOR, 0, null())
-    };
-    assert!(res != 0, "{}", Error::last_os_error());
-}
-
-fn enable_or_disable_menu_item(menu: HMENU, id: u16, enable: bool) {
-    let res = unsafe {
-        EnableMenuItem(menu, u32::from(id), if enable { MF_ENABLED } else { MF_GRAYED })
-    };
-    assert!(res != -1);
 }
 
 enum Idm {
@@ -1195,7 +921,7 @@ static mut STATIC_HWND: Option<HWND> = None;
 
 fn main() -> Result<(), Error> {
     std::panic::set_hook(Box::new(panic_hook));
-    let hwnd = create_window("an_editor", "window title")?;
+    let hwnd = create_window("an_editor", "window title", Some(my_window_proc))?;
     unsafe {
         STATIC_HWND = Some(hwnd);
     }
