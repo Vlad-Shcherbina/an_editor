@@ -241,21 +241,35 @@ fn paint(app_state: &mut AppState) {
 }
 
 fn load_document(app_state: &mut Token<AppState>, path: PathBuf) {
-    match std::fs::read_to_string(&path) {
-        Ok(mut content) => {
-            let mut app_state = app_state.borrow_mut();
-            let initially_modified = if content.contains('\r') {
-                content = content.replace('\r', "");
-                assert!(app_state.flash.is_none());
-                app_state.flash = Some(
-                    "CRLF line breaks were converted to LF".to_owned());
+    match std::fs::read(&path) {
+        Ok(data) => {
+            let mut content = String::from_utf8_lossy(&data);
+            let utf8_loss = match content {
+                std::borrow::Cow::Borrowed(_) => false,
+                std::borrow::Cow::Owned(_) => true,
+            };
+            let crlf_fix = if content.contains('\r') {
+                content = content.replace('\r', "").into();
                 true
             } else {
                 false
             };
+            let mut app_state = app_state.borrow_mut();
             app_state.filename = Some(path);
-            app_state.view_state.load(&content, initially_modified);
+            app_state.view_state.load(&content, utf8_loss || crlf_fix);
             app_state.update_title();
+
+            if utf8_loss || crlf_fix {
+                let mut messages = Vec::new();
+                if utf8_loss {
+                    messages.push("File is not valid UTF-8, problematic parts were replaced with '�'.");
+                }
+                if crlf_fix {
+                    messages.push("CRLF line breaks were converted to LF.");
+                }
+                assert!(app_state.flash.is_none());
+                app_state.flash = Some(messages.join("\n"));
+            }
         }
         Err(e) => {
             let msg = format!("Can't open {}.\n{}", path.to_string_lossy(), e);
