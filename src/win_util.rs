@@ -112,12 +112,21 @@ pub fn invalidate_rect(hwnd: HWND) {
     }
 }
 
+// Why not just write `p as *mut T2`?
+// Because then when casting from say *mut void to *mut u16,
+// Clippy complains about pointer alignment
+// https://rust-lang.github.io/rust-clippy/master/index.html#cast_ptr_alignment
+fn cast_ptr<T1, T2>(p: *mut T1) -> *mut T2 {
+    assert!(p as usize % std::mem::align_of::<T2>() == 0);
+    p as *mut T2
+}
+
 pub fn get_clipboard(hwnd: HWND) -> String {
     unsafe {
         let res = OpenClipboard(hwnd);
         assert!(res != 0);
         let h = GetClipboardData(CF_UNICODETEXT);
-        let pdata = GlobalLock(h) as *mut u16;
+        let pdata: *mut u16 = cast_ptr(GlobalLock(h));
         assert!(!pdata.is_null());
         let mut data = Vec::new();
         let mut pos = 0;
@@ -148,7 +157,7 @@ pub fn set_clipboard(hwnd: HWND, s: &str) {
         let h = GlobalAlloc(GMEM_MOVEABLE, data.len() * 2);
         assert!(!h.is_null());
 
-        let pdata = GlobalLock(h) as *mut u16;
+        let pdata: *mut u16 = cast_ptr(GlobalLock(h));
         assert!(!pdata.is_null());
         for (i, c) in data.into_iter().enumerate() {
             *pdata.add(i) = c;
