@@ -86,6 +86,7 @@ impl ViewState {
 
     fn replace_slice(&mut self, start: usize, end: usize, text: &[char]) {
         let u = self.replace_slice_and_get_edit(start, end, text);
+        assert!(!self.undo_snapshots.is_empty());
         self.undo_slice_edits.extend(u.into_iter());
     }
 

@@ -586,12 +586,20 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
                 send_message(app_state, WM_COMMAND, Idm::SelectAll as usize, 0);
                 return;
             }
-            83 => {  // ord('S')
-                send_message(app_state, WM_COMMAND, Idm::Save as usize, 0);
+            78 => {  // ord('N')
+                send_message(app_state, WM_COMMAND, Idm::New as usize, 0);
                 return;
             }
             79 => {  // ord('O')
                 send_message(app_state, WM_COMMAND, Idm::Open as usize, 0);
+                return;
+            }
+            83 => {  // ord('S')
+                if shift_pressed {
+                    send_message(app_state, WM_COMMAND, Idm::SaveAs as usize, 0);
+                } else {
+                    send_message(app_state, WM_COMMAND, Idm::Save as usize, 0);
+                }
                 return;
             }
             _ => {}
@@ -763,8 +771,10 @@ fn enable_or_disable_menu_item(menu: HMENU, id: u16, enable: bool) {
 }
 
 enum Idm {
-    Open = 1,
+    New = 1,
+    Open,
     Save,
+    SaveAs,
     Exit,
     Undo,
     Redo,
@@ -776,8 +786,10 @@ enum Idm {
 
 fn create_app_menu() -> HMENU {
     let file_menu = create_menu();
-    append_menu_string(file_menu, Idm::Open as u16, "&Open\tCtrl-O");
+    append_menu_string(file_menu, Idm::New as u16, "&New\tCtrl-N");
+    append_menu_string(file_menu, Idm::Open as u16, "&Open...\tCtrl-O");
     append_menu_string(file_menu, Idm::Save as u16, "&Save\tCtrl-S");
+    append_menu_string(file_menu, Idm::SaveAs as u16, "&Save As...\tCtrl-Shift-S");
     append_menu_separator(file_menu);
     append_menu_string(file_menu, Idm::Exit as u16, "&Exit\tAlt-F4");
     let edit_menu = create_menu();
@@ -796,6 +808,10 @@ fn create_app_menu() -> HMENU {
 }
 
 fn enable_available_menu_items(app_state: &mut AppState) {
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::New as u16,
+        app_state.filename.is_some() || app_state.view_state.modified());
     enable_or_disable_menu_item(
         app_state.menu,
         Idm::Save as u16,
@@ -924,13 +940,25 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 if id == Idm::Exit as u16 {
                     let res = PostMessageW(hWnd, WM_CLOSE, 0, 0);
                     assert!(res != 0, "{}", Error::last_os_error());
+                } else if id == Idm::New as u16 {
+                    let modified = app_state.borrow_mut().view_state.modified();
+                    if !modified ||
+                        prompt_about_unsaved_changes(app_state) {
+                        let mut app_state = app_state.borrow_mut();
+                        app_state.last_action = ActionType::Other;
+                        app_state.filename = None;
+                        app_state.view_state.load("", false);
+                        invalidate_rect(app_state.hwnd);
+                        app_state.update_title();
+                    }
                 } else if id == Idm::Open as u16 {
                     let modified = app_state.borrow_mut().view_state.modified();
                     if !modified ||
                         prompt_about_unsaved_changes(app_state) {
                         if let Some(path) = file_dialog(app_state, FileDialogType::Open) {
                             load_document(app_state, path);
-                            let app_state = app_state.borrow_mut();
+                            let mut app_state = app_state.borrow_mut();
+                            app_state.last_action = ActionType::Other;
                             invalidate_rect(app_state.hwnd);
                             app_state.update_title();
                         }
@@ -945,6 +973,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                                 drop(g);
                                 save_document(app_state, path);
                                 app_state.borrow_mut().update_title();
+                                app_state.borrow_mut().last_action = ActionType::Other;
                             }
                         }
                         None => {
@@ -952,10 +981,17 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                             if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
                                 save_document(app_state, path);
                                 let mut g = app_state.borrow_mut();
-                                g.view_state.set_unmodified_snapshot();
                                 g.update_title();
+                                g.last_action = ActionType::Other;
                             }
                         }
+                    }
+                } else if id == Idm::SaveAs as u16 {
+                    if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
+                        save_document(app_state, path);
+                        let mut g = app_state.borrow_mut();
+                        g.update_title();
+                        g.last_action = ActionType::Other;
                     }
                 } else if id == Idm::Undo as u16 {
                     let mut g = app_state.borrow_mut();
