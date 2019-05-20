@@ -560,6 +560,136 @@ fn enable_available_menu_items(app_state: &mut AppState) {
         app_state.view_state.has_selection());
 }
 
+fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
+    let cmd = if id == Idm::New as u16 { Idm::New }
+        else if id == Idm::Open as u16 { Idm::Open }
+        else if id == Idm::Save as u16 { Idm::Save }
+        else if id == Idm::SaveAs as u16 { Idm::SaveAs }
+        else if id == Idm::Exit as u16 { Idm::Exit }
+        else if id == Idm::Undo as u16 { Idm::Undo }
+        else if id == Idm::Redo as u16 { Idm::Redo }
+        else if id == Idm::Cut as u16 { Idm::Cut }
+        else if id == Idm::Copy as u16 { Idm::Copy }
+        else if id == Idm::Paste as u16 { Idm::Paste }
+        else if id == Idm::SelectAll as u16 { Idm::SelectAll }
+        else { panic!("{}", id) };
+
+    match cmd {
+        Idm::Exit => {
+            let hwnd = app_state.borrow_mut().hwnd;
+            let res = unsafe { PostMessageW(hwnd, WM_CLOSE, 0, 0) };
+            assert!(res != 0, "{}", Error::last_os_error());
+        }
+        Idm::New => {
+            let modified = app_state.borrow_mut().view_state.modified();
+            if !modified ||
+                prompt_about_unsaved_changes(app_state) {
+                let mut app_state = app_state.borrow_mut();
+                app_state.last_action = ActionType::Other;
+                app_state.filename = None;
+                app_state.view_state.load("", false);
+                invalidate_rect(app_state.hwnd);
+                app_state.update_title();
+            }
+        }
+        Idm::Open => {
+            let modified = app_state.borrow_mut().view_state.modified();
+            if !modified ||
+                prompt_about_unsaved_changes(app_state) {
+                if let Some(path) = file_dialog(app_state, FileDialogType::Open) {
+                    load_document(app_state, path);
+                    let mut app_state = app_state.borrow_mut();
+                    app_state.last_action = ActionType::Other;
+                    invalidate_rect(app_state.hwnd);
+                    app_state.update_title();
+                }
+            }
+        }
+        Idm::Save => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            match &a.filename {
+                Some(path) => {
+                    if a.view_state.modified() {
+                        let path = path.clone();
+                        drop(g);
+                        save_document(app_state, path);
+                        app_state.borrow_mut().update_title();
+                        app_state.borrow_mut().last_action = ActionType::Other;
+                    }
+                }
+                None => {
+                    drop(g);
+                    if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
+                        save_document(app_state, path);
+                        let mut g = app_state.borrow_mut();
+                        g.update_title();
+                        g.last_action = ActionType::Other;
+                    }
+                }
+            }
+        }
+        Idm::SaveAs => {
+            if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
+                save_document(app_state, path);
+                let mut g = app_state.borrow_mut();
+                g.update_title();
+                g.last_action = ActionType::Other;
+            }
+        }
+        Idm::Undo => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.last_action = ActionType::Other;
+            a.view_state.undo();
+            invalidate_rect(a.hwnd);
+            a.update_title();
+        }
+        Idm::Redo => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.last_action = ActionType::Other;
+            a.view_state.redo();
+            invalidate_rect(a.hwnd);
+            a.update_title();
+        }
+        Idm::Cut => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.last_action = ActionType::Other;
+            a.view_state.make_undo_snapshot();
+            let s = a.view_state.cut_selection();
+            set_clipboard(a.hwnd, &s);
+            invalidate_rect(a.hwnd);
+            a.update_title();
+        }
+        Idm::Copy => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.last_action = ActionType::Other;
+            let s = a.view_state.get_selection();
+            set_clipboard(a.hwnd, &s);
+        }
+        Idm::Paste => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.last_action = ActionType::Other;
+            a.view_state.make_undo_snapshot();
+            let s = get_clipboard(a.hwnd);
+            a.view_state.paste(&s);
+            invalidate_rect(a.hwnd);
+            a.update_title();
+        }
+        Idm::SelectAll => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.last_action = ActionType::Other;
+            a.view_state.select_all();
+            invalidate_rect(a.hwnd);
+        }
+    }
+}
+
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 unsafe extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
@@ -663,109 +793,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             if HIWORD(wParam as u32) == 0 {
                 let app_state = &mut get_app_state(hWnd);
                 let id = LOWORD(wParam as u32);
-                if id == Idm::Exit as u16 {
-                    let res = PostMessageW(hWnd, WM_CLOSE, 0, 0);
-                    assert!(res != 0, "{}", Error::last_os_error());
-                } else if id == Idm::New as u16 {
-                    let modified = app_state.borrow_mut().view_state.modified();
-                    if !modified ||
-                        prompt_about_unsaved_changes(app_state) {
-                        let mut app_state = app_state.borrow_mut();
-                        app_state.last_action = ActionType::Other;
-                        app_state.filename = None;
-                        app_state.view_state.load("", false);
-                        invalidate_rect(app_state.hwnd);
-                        app_state.update_title();
-                    }
-                } else if id == Idm::Open as u16 {
-                    let modified = app_state.borrow_mut().view_state.modified();
-                    if !modified ||
-                        prompt_about_unsaved_changes(app_state) {
-                        if let Some(path) = file_dialog(app_state, FileDialogType::Open) {
-                            load_document(app_state, path);
-                            let mut app_state = app_state.borrow_mut();
-                            app_state.last_action = ActionType::Other;
-                            invalidate_rect(app_state.hwnd);
-                            app_state.update_title();
-                        }
-                    }
-                } else if id == Idm::Save as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    match &a.filename {
-                        Some(path) => {
-                            if a.view_state.modified() {
-                                let path = path.clone();
-                                drop(g);
-                                save_document(app_state, path);
-                                app_state.borrow_mut().update_title();
-                                app_state.borrow_mut().last_action = ActionType::Other;
-                            }
-                        }
-                        None => {
-                            drop(g);
-                            if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
-                                save_document(app_state, path);
-                                let mut g = app_state.borrow_mut();
-                                g.update_title();
-                                g.last_action = ActionType::Other;
-                            }
-                        }
-                    }
-                } else if id == Idm::SaveAs as u16 {
-                    if let Some(path) = file_dialog(app_state, FileDialogType::SaveAs) {
-                        save_document(app_state, path);
-                        let mut g = app_state.borrow_mut();
-                        g.update_title();
-                        g.last_action = ActionType::Other;
-                    }
-                } else if id == Idm::Undo as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    a.last_action = ActionType::Other;
-                    a.view_state.undo();
-                    invalidate_rect(a.hwnd);
-                    a.update_title();
-                } else if id == Idm::Redo as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    a.last_action = ActionType::Other;
-                    a.view_state.redo();
-                    invalidate_rect(a.hwnd);
-                    a.update_title();
-                } else if id == Idm::Cut as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    a.last_action = ActionType::Other;
-                    a.view_state.make_undo_snapshot();
-                    let s = a.view_state.cut_selection();
-                    set_clipboard(a.hwnd, &s);
-                    invalidate_rect(a.hwnd);
-                    a.update_title();
-                } else if id == Idm::Copy as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    a.last_action = ActionType::Other;
-                    let s = a.view_state.get_selection();
-                    set_clipboard(a.hwnd, &s);
-                } else if id == Idm::Paste as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    a.last_action = ActionType::Other;
-                    a.view_state.make_undo_snapshot();
-                    let s = get_clipboard(a.hwnd);
-                    a.view_state.paste(&s);
-                    invalidate_rect(a.hwnd);
-                    a.update_title();
-                } else if id == Idm::SelectAll as u16 {
-                    let mut g = app_state.borrow_mut();
-                    let a = &mut *g;
-                    a.last_action = ActionType::Other;
-                    a.view_state.select_all();
-                    invalidate_rect(a.hwnd);
-                } else {
-                    panic!("{}", id);
-                }
+                handle_menu_command(app_state, id);
             }
             0
         }
