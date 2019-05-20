@@ -71,6 +71,13 @@ impl ViewState {
         }
     }
 
+    pub fn change_text_format(&mut self, text_format: ComPtr<IDWriteTextFormat>) {
+        self.text_format = text_format;
+        for i in 0..self.document.num_lines() {
+            *self.document.get_line_mut(i).data = None;
+        }
+    }
+
     fn replace_slice_and_get_edit(&mut self, start: usize, end: usize, text: &[char]) -> Option<SliceEdit> {
         if self.document.slice_string(start, end).chars().eq(text.iter().cloned()) {
             return None;

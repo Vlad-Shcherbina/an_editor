@@ -43,8 +43,10 @@ enum ActionType {
 struct AppState {
     hwnd: HWND,
 
+    dwrite_factory: ComPtr<IDWriteFactory>,
     resources: Resources,
     view_state: ViewState,
+    font_size: f32,
 
     filename: Option<PathBuf>,
 
@@ -103,8 +105,10 @@ impl AppState {
 
         AppState {
             hwnd,
+            dwrite_factory,
             resources,
             view_state,
+            font_size: DEFAULT_FONT_SIZE,
 
             filename: None,
 
@@ -193,29 +197,36 @@ impl Resources {
             assert!(hr == S_OK, "0x{:x}", hr);
             ComPtr::from_raw(brush)
         };
-        let text_format = unsafe {
-            let mut text_format = null_mut();
-            let hr = dwrite_factory.CreateTextFormat(
-                win32_string("Arial").as_ptr(),
-                null_mut(),
-                DWRITE_FONT_WEIGHT_REGULAR,
-                DWRITE_FONT_STYLE_NORMAL,
-                DWRITE_FONT_STRETCH_NORMAL,
-                14.0,
-                win32_string("en-us").as_ptr(),
-                &mut text_format,
-            );
-            assert!(hr == S_OK, "0x{:x}", hr);
-            ComPtr::from_raw(text_format)
-        };
         Resources {
             render_target,
             brush: brush.up(),
             sel_brush: sel_brush.up(),
-            text_format,
+            text_format: create_text_format(dwrite_factory, DEFAULT_FONT_SIZE),
         }
     }
 }
+
+fn create_text_format(dwrite_factory: &ComPtr<IDWriteFactory>, size: f32) -> ComPtr<IDWriteTextFormat> {
+    unsafe {
+        let mut text_format = null_mut();
+        let hr = dwrite_factory.CreateTextFormat(
+            win32_string("Arial").as_ptr(),
+            null_mut(),
+            DWRITE_FONT_WEIGHT_REGULAR,
+            DWRITE_FONT_STYLE_NORMAL,
+            DWRITE_FONT_STRETCH_NORMAL,
+            size,
+            win32_string("en-us").as_ptr(),
+            &mut text_format,
+        );
+        assert!(hr == S_OK, "0x{:x}", hr);
+        ComPtr::from_raw(text_format)
+    }
+}
+
+const DEFAULT_FONT_SIZE: f32 = 14.0;
+const MIN_FONT_SIZE: f32 = 4.0;
+const MAX_FONT_SIZE: f32 = 32.0;
 
 const PADDING_LEFT: f32 = 5.0;
 
@@ -359,6 +370,14 @@ fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32
 
     if ctrl_pressed {
         match scan_code {
+            12 | 74 => {  // ctrl--
+                send_message(app_state, WM_COMMAND, Idm::SmallerFont as usize, 0);
+                return;
+            }
+            13 | 78 => {  // ctrl-+
+                send_message(app_state, WM_COMMAND, Idm::LargerFont as usize, 0);
+                return;
+            }
             0x2d => {  // ctrl-X
                 send_message(app_state, WM_COMMAND, Idm::Cut as usize, 0);
                 return;
@@ -522,6 +541,8 @@ enum Idm {
     Copy,
     Paste,
     SelectAll,
+    SmallerFont,
+    LargerFont,
 }
 
 fn create_app_menu() -> HMENU {
@@ -541,9 +562,13 @@ fn create_app_menu() -> HMENU {
     append_menu_string(edit_menu, Idm::Paste as u16, "&Paste\tCtrl-V or Shift-Ins");
     append_menu_separator(edit_menu);
     append_menu_string(edit_menu, Idm::SelectAll as u16, "&Select all\tCtrl-A");
+    let view_menu = create_menu();
+    append_menu_string(view_menu, Idm::SmallerFont as u16, "&Smaller font\tCtrl-- or Ctrl-Wheel Up");
+    append_menu_string(view_menu, Idm::LargerFont as u16, "&Larger font\tCtrl-+ or Ctrl-Wheel Down");
     let menu = create_menu();
     append_menu_popup(menu, file_menu, "&File");
     append_menu_popup(menu, edit_menu, "&Edit");
+    append_menu_popup(menu, view_menu, "&View");
     menu
 }
 
@@ -572,6 +597,14 @@ fn enable_available_menu_items(app_state: &mut AppState) {
         app_state.menu,
         Idm::Copy as u16,
         app_state.view_state.has_selection());
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::SmallerFont as u16,
+        app_state.font_size > MIN_FONT_SIZE);
+    enable_or_disable_menu_item(
+        app_state.menu,
+        Idm::LargerFont as u16,
+        app_state.font_size < MAX_FONT_SIZE);
 }
 
 fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
@@ -586,6 +619,8 @@ fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
         else if id == Idm::Copy as u16 { Idm::Copy }
         else if id == Idm::Paste as u16 { Idm::Paste }
         else if id == Idm::SelectAll as u16 { Idm::SelectAll }
+        else if id == Idm::SmallerFont as u16 { Idm::SmallerFont }
+        else if id == Idm::LargerFont as u16 { Idm::LargerFont }
         else { panic!("{}", id) };
 
     match cmd {
@@ -699,6 +734,24 @@ fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
             let a = &mut *g;
             a.last_action = ActionType::Other;
             a.view_state.select_all();
+            invalidate_rect(a.hwnd);
+        }
+        Idm::SmallerFont => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.font_size -= 1.0;
+            a.font_size = a.font_size.max(MIN_FONT_SIZE);
+            a.resources.text_format = create_text_format(&a.dwrite_factory, a.font_size);
+            a.view_state.change_text_format(a.resources.text_format.clone());
+            invalidate_rect(a.hwnd);
+        }
+        Idm::LargerFont => {
+            let mut g = app_state.borrow_mut();
+            let a = &mut *g;
+            a.font_size += 1.0;
+            a.font_size = a.font_size.min(MAX_FONT_SIZE);
+            a.resources.text_format = create_text_format(&a.dwrite_factory, a.font_size);
+            a.view_state.change_text_format(a.resources.text_format.clone());
             invalidate_rect(a.hwnd);
         }
     }
@@ -865,18 +918,32 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_MOUSEWHEEL => {
             let delta = GET_WHEEL_DELTA_WPARAM(wParam);
             println!("WM_MOUSEWHEEL {}", delta);
-            let mut scroll_lines: UINT = 0;
-            let res = unsafe {
-                SystemParametersInfoW(
-                    SPI_GETWHEELSCROLLLINES,
-                    0,
-                    &mut scroll_lines as *mut _ as *mut _,
-                    0)};
-            assert!(res != 0, "{}", Error::last_os_error());
-            let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
+
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
-            app_state.view_state.scroll(delta);
+
+            let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
+            if ctrl_pressed {
+                let delta = f32::from(delta) / 120.0;
+                app_state.font_size += delta;
+                app_state.font_size = app_state.font_size.max(MIN_FONT_SIZE);
+                app_state.font_size = app_state.font_size.min(MAX_FONT_SIZE);
+                let tf = create_text_format(&app_state.dwrite_factory, app_state.font_size);
+                app_state.resources.text_format = tf.clone();
+                app_state.view_state.change_text_format(tf.clone());
+                invalidate_rect(app_state.hwnd);
+            } else {
+                let mut scroll_lines: UINT = 0;
+                let res = unsafe {
+                    SystemParametersInfoW(
+                        SPI_GETWHEELSCROLLLINES,
+                        0,
+                        &mut scroll_lines as *mut _ as *mut _,
+                        0)};
+                assert!(res != 0, "{}", Error::last_os_error());
+                let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
+                app_state.view_state.scroll(delta);
+            }
             invalidate_rect(app_state.hwnd);
             0
         }
