@@ -161,7 +161,7 @@ impl Resources {
             };
             let mut rc: RECT = mem::uninitialized();
             let res = GetClientRect(hwnd, &mut rc);
-            assert!(res != 0);
+            assert!(res != 0, "{}", Error::last_os_error());
             let hwnd_render_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
                 hwnd,
                 pixelSize: D2D1_SIZE_U {
@@ -858,7 +858,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                     0,
                     &mut scroll_lines as *mut _ as *mut _,
                     0)};
-            assert!(res != 0);
+            assert!(res != 0, "{}", Error::last_os_error());
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
