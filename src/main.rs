@@ -691,7 +691,7 @@ fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
 }
 
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
-unsafe extern "system"
+extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {
@@ -702,7 +702,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let user_data = Box::into_raw(Box::new(std::cell::RefCell::new(app_state)));
             let user_data = user_data as isize;
 
-            let old_user_data = SetWindowLongPtrW(hWnd, GWLP_USERDATA, user_data);
+            let old_user_data = unsafe { SetWindowLongPtrW(hWnd, GWLP_USERDATA, user_data) };
             assert!(old_user_data == 0);
             let e = Error::last_os_error();
             assert!(e.raw_os_error() == Some(0), "{}", e);
@@ -723,12 +723,14 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             // just to ensure nobody is borrowing it at the moment
             get_app_state(hWnd).borrow_mut();
 
-            let user_data = GetWindowLongPtrW(hWnd, GWLP_USERDATA);
+            let user_data = unsafe { GetWindowLongPtrW(hWnd, GWLP_USERDATA) };
             assert!(user_data != 0, "{}", Error::last_os_error());
-            let app_state = Box::from_raw(user_data as *mut std::cell::RefCell<AppState>);
+            let app_state = unsafe {
+                Box::from_raw(user_data as *mut std::cell::RefCell<AppState>)
+            };
             drop(app_state);
 
-            PostQuitMessage(0);
+            unsafe { PostQuitMessage(0); }
             0
         }
         WM_CLOSE => {
@@ -737,7 +739,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let modified = app_state.borrow_mut().view_state.modified();
             if !modified ||
                prompt_about_unsaved_changes(app_state) {
-                DestroyWindow(hWnd);
+                unsafe { DestroyWindow(hWnd); }
             }
             0
         }
@@ -747,7 +749,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let flash = {
                 let mut app_state = app_state.borrow_mut();
                 paint(&mut *app_state);
-                let ret = ValidateRect(hWnd, null());
+                let ret = unsafe { ValidateRect(hWnd, null()) };
                 assert!(ret != 0);
                 app_state.flash.take()
             };
@@ -774,10 +776,10 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             if render_size.width == 0 && render_size.height == 0 {
                 println!("minimize");
             } else {
-                let hr = resources.render_target.Resize(&render_size);
+                let hr = unsafe { resources.render_target.Resize(&render_size) };
                 assert!(hr == S_OK, "0x{:x}", hr);
 
-                let size = resources.render_target.GetSize();
+                let size = unsafe { resources.render_target.GetSize() };
                 view_state.resize(size.width - PADDING_LEFT, size.height);
             }
             0
@@ -807,12 +809,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let y = GET_Y_LPARAM(lParam);
             app_state.last_action = ActionType::Other;
             app_state.view_state.click(x as f32 - PADDING_LEFT, y as f32);
-            let shift_pressed = GetKeyState(VK_SHIFT) as u16 & 0x8000 != 0;
+            let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
             if !shift_pressed {
                 app_state.view_state.clear_selection();
             }
             invalidate_rect(app_state.hwnd);
-            SetCapture(hWnd);
+            unsafe { SetCapture(hWnd); }
             0
         }
         WM_LBUTTONUP => {
@@ -820,8 +822,8 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
             app_state.left_button_pressed = false;
-            let res = ReleaseCapture();
-            assert!(res != 0);
+            let res = unsafe { ReleaseCapture() };
+            assert!(res != 0, "{}", Error::last_os_error());
             0
         }
         WM_LBUTTONDBLCLK => {
@@ -850,11 +852,12 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             let delta = GET_WHEEL_DELTA_WPARAM(wParam);
             println!("WM_MOUSEWHEEL {}", delta);
             let mut scroll_lines: UINT = 0;
-            let res = SystemParametersInfoW(
-                SPI_GETWHEELSCROLLLINES,
-                0,
-                &mut scroll_lines as *mut _ as *mut _,
-                0);
+            let res = unsafe {
+                SystemParametersInfoW(
+                    SPI_GETWHEELSCROLLLINES,
+                    0,
+                    &mut scroll_lines as *mut _ as *mut _,
+                    0)};
             assert!(res != 0);
             let delta = f32::from(delta) / 120.0 * scroll_lines as f32;
             let app_state = &mut get_app_state(hWnd);
@@ -887,7 +890,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             handle_keydown(app_state, key_code, scan_code);
             0
         }
-        _ => DefWindowProcW(hWnd, msg, wParam, lParam)
+        _ => unsafe { DefWindowProcW(hWnd, msg, wParam, lParam) }
     }
 }
 
