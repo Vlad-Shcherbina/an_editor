@@ -26,11 +26,13 @@ mod text_layout;
 mod line_gap_buffer;
 mod view_state;
 mod win_util;
+mod key_util;
 
 use com_ptr::ComPtr;
 use view_state::ViewState;
 
 use win_util::*;
+use key_util::{KeyEvent, KeyMatcher};
 
 #[derive(PartialEq, Eq)]
 enum ActionType {
@@ -56,6 +58,7 @@ struct AppState {
     last_action: ActionType,
 
     menu: HMENU,
+    key_bindings: Vec<(KeyMatcher, Idm)>,
 }
 
 impl HasHwnd for AppState {
@@ -118,6 +121,7 @@ impl AppState {
             last_action: ActionType::Other,
 
             menu: create_app_menu(),
+            key_bindings: init_key_bindings(),
         }
     }
 
@@ -348,89 +352,58 @@ fn prompt_about_unsaved_changes(app_state: &mut Token<AppState>) -> bool {
     false
 }
 
-fn handle_keydown(app_state: &mut Token<AppState>, key_code: i32, scan_code: i32) {
-    let ctrl_pressed = unsafe { GetKeyState(VK_CONTROL) } as u16 & 0x8000 != 0;
-    let shift_pressed = unsafe { GetKeyState(VK_SHIFT) } as u16 & 0x8000 != 0;
+fn init_key_bindings() -> Vec<(KeyMatcher, Idm)> {
+    use key_util::{CTRL, SHIFT};
+    let vk = |key_code| KeyMatcher::from_key_code(key_code);
+    let ch_scan = |c| KeyMatcher::from_char_to_scan_code(c);
+    vec![
+        (SHIFT + vk(VK_DELETE), Idm::Cut),
+        (CTRL + vk(VK_INSERT), Idm::Copy),
+        (SHIFT + vk(VK_INSERT), Idm::Paste),
+        (CTRL + ch_scan('X'), Idm::Cut),
+        (CTRL + ch_scan('C'), Idm::Copy),
+        (CTRL + ch_scan('V'), Idm::Paste),
 
-    match key_code {
-        VK_DELETE if shift_pressed => {  // shift-del
-            send_message(app_state, WM_COMMAND, Idm::Cut as usize, 0);
-            return;
-        }
-        VK_INSERT if ctrl_pressed && !shift_pressed => {  // ctrl-ins (copy)
-            send_message(app_state, WM_COMMAND, Idm::Copy as usize, 0);
-            return;
-        }
-        VK_INSERT if shift_pressed && !ctrl_pressed => {  // shift-ins (paste)
-            send_message(app_state, WM_COMMAND, Idm::Paste as usize, 0);
-            return;
-        }
-        _ => {}
-    }
+        (CTRL + vk(VK_OEM_MINUS), Idm::SmallerFont),
+        (CTRL + vk(VK_OEM_PLUS), Idm::LargerFont),
+        (CTRL + vk(VK_SUBTRACT), Idm::SmallerFont),
+        (CTRL + vk(VK_ADD), Idm::LargerFont),
 
-    if ctrl_pressed {
-        match scan_code {
-            12 | 74 => {  // ctrl--
-                send_message(app_state, WM_COMMAND, Idm::SmallerFont as usize, 0);
-                return;
-            }
-            13 | 78 => {  // ctrl-+
-                send_message(app_state, WM_COMMAND, Idm::LargerFont as usize, 0);
-                return;
-            }
-            0x2d => {  // ctrl-X
-                send_message(app_state, WM_COMMAND, Idm::Cut as usize, 0);
-                return;
-            }
-            0x2e => {  // ctrl-C
-                send_message(app_state, WM_COMMAND, Idm::Copy as usize, 0);
-                return;
-            }
-            0x2f => {  // ctrl-V
-                send_message(app_state, WM_COMMAND, Idm::Paste as usize, 0);
-                return;
-            }
-            0x2c => {  // ctrl-Z
-                send_message(app_state, WM_COMMAND, Idm::Undo as usize, 0);
-                return;
-            }
-            _ => {}
-        }
-        match key_code {
-            89 => {  // ord('Y')
-                send_message(app_state, WM_COMMAND, Idm::Redo as usize, 0);
-                return;
-            }
-            65 => {  // ord('A')
-                send_message(app_state, WM_COMMAND, Idm::SelectAll as usize, 0);
-                return;
-            }
-            78 => {  // ord('N')
-                send_message(app_state, WM_COMMAND, Idm::New as usize, 0);
-                return;
-            }
-            79 => {  // ord('O')
-                send_message(app_state, WM_COMMAND, Idm::Open as usize, 0);
-                return;
-            }
-            83 => {  // ord('S')
-                if shift_pressed {
-                    send_message(app_state, WM_COMMAND, Idm::SaveAs as usize, 0);
-                } else {
-                    send_message(app_state, WM_COMMAND, Idm::Save as usize, 0);
-                }
-                return;
-            }
-            _ => {}
-        }
-    }
+        (CTRL + ch_scan('Z'), Idm::Undo),
+        (CTRL + ch_scan('Y'), Idm::Redo),
 
+        (CTRL + ch_scan('A'), Idm::SelectAll),
+        (CTRL + ch_scan('N'), Idm::New),
+        (CTRL + ch_scan('O'), Idm::Open),
+        (CTRL + ch_scan('S'), Idm::Save),
+        (CTRL + (SHIFT + ch_scan('S')), Idm::SaveAs),
+    ]
+}
+
+fn handle_keydown(app_state: &mut Token<AppState>, k: KeyEvent) {
     let mut g = app_state.borrow_mut();
     let a = &mut *g;
+
+    let mut matches = Vec::new();
+    for (km, cmd) in &a.key_bindings {
+        if km.matches(&k) {
+            matches.push(*cmd);
+        }
+    }
+    assert!(matches.len() < 2);
+    if let Some(&cmd) = matches.first() {
+        drop(g);
+        send_message(app_state, WM_COMMAND, cmd as usize, 0);
+        return;
+    }
+
     let view_state = &mut a.view_state;
 
+    let ctrl_pressed = k.ctrl_pressed;
+    let shift_pressed = k.shift_pressed;
+
     let mut regular_movement_cmd = true;
-    match key_code {
+    match k.key_code {
         VK_BACK => {
             // TODO: also make shapshot before deleting newline
             if a.last_action != ActionType::Backspace {
@@ -529,6 +502,7 @@ fn get_app_state(hwnd: HWND) -> Token<AppState> {
     Token::new(cell)
 }
 
+#[derive(Clone, Copy)]
 enum Idm {
     New = 1,
     Open,
@@ -966,11 +940,10 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_KEYDOWN => {
-            println!("WM_KEYDOWN {}", wParam);
-            let key_code = wParam as i32;
-            let scan_code = ((lParam >> 16) & 511) as i32;
+            let ke = key_util::KeyEvent::new(wParam, lParam);
+            println!("WM_KEYDOWN {:?}", ke);
             let app_state = &mut get_app_state(hWnd);
-            handle_keydown(app_state, key_code, scan_code);
+            handle_keydown(app_state, ke);
             0
         }
         _ => unsafe { DefWindowProcW(hWnd, msg, wParam, lParam) }
