@@ -119,7 +119,7 @@ fn cast_ptr<T1, T2>(p: *mut T1) -> *mut T2 {
     p as *mut T2
 }
 
-pub fn get_clipboard(hwnd: HWND) -> String {
+pub fn get_clipboard(hwnd: HWND) -> Option<String> {
     unsafe {
         let res = OpenClipboard(hwnd);
         assert!(res != 0, "{}", Error::last_os_error());
@@ -127,6 +127,7 @@ pub fn get_clipboard(hwnd: HWND) -> String {
         if h.is_null() {
             let e = Error::last_os_error();
             assert!(e.raw_os_error() == Some(0), "{}", e);
+            return None;
         }
         let pdata: *mut u16 = cast_ptr(GlobalLock(h));
         assert!(!pdata.is_null());
@@ -145,7 +146,7 @@ pub fn get_clipboard(hwnd: HWND) -> String {
         }
         let res = CloseClipboard();
         assert!(res != 0, "{}", Error::last_os_error());
-        s.replace("\r\n", "\n")
+        Some(s.replace("\r\n", "\n"))
     }
 }
 

@@ -723,11 +723,13 @@ fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
             let mut g = app_state.borrow_mut();
             let a = &mut *g;
             a.last_action = ActionType::Other;
-            a.view_state.make_undo_snapshot();
             let s = get_clipboard(a.hwnd);
-            a.view_state.paste(&s);
-            invalidate_rect(a.hwnd);
-            a.update_title();
+            if let Some(s) = s {
+                a.view_state.make_undo_snapshot();
+                a.view_state.paste(&s);
+                invalidate_rect(a.hwnd);
+                a.update_title();
+            }
         }
         Idm::SelectAll => {
             let mut g = app_state.borrow_mut();
