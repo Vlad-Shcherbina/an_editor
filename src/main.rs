@@ -140,6 +140,17 @@ impl AppState {
     fn update_title(&self) {
         set_window_title(self.hwnd, &self.get_title());
     }
+
+    fn match_key_event(&self, k: &KeyEvent) -> Option<Idm> {
+        let mut matches = Vec::new();
+        for (km, cmd) in &self.key_bindings {
+            if km.matches(k) {
+                matches.push(*cmd);
+            }
+        }
+        assert!(matches.len() < 2);
+        matches.first().cloned()
+    }
 }
 
 struct Resources {
@@ -353,7 +364,7 @@ fn prompt_about_unsaved_changes(app_state: &mut Token<AppState>) -> bool {
 }
 
 fn init_key_bindings() -> Vec<(KeyMatcher, Idm)> {
-    use key_util::{CTRL, SHIFT};
+    use key_util::{CTRL, SHIFT, ALT};
     let vk = |key_code| KeyMatcher::from_key_code(key_code);
     let ch_scan = |c| KeyMatcher::from_char_to_scan_code(c);
     vec![
@@ -377,6 +388,8 @@ fn init_key_bindings() -> Vec<(KeyMatcher, Idm)> {
         (CTRL + ch_scan('O'), Idm::Open),
         (CTRL + ch_scan('S'), Idm::Save),
         (CTRL + (SHIFT + ch_scan('S')), Idm::SaveAs),
+
+        (ALT + ch_scan('Q'), Idm::Exit),
     ]
 }
 
@@ -384,14 +397,7 @@ fn handle_keydown(app_state: &mut Token<AppState>, k: KeyEvent) {
     let mut g = app_state.borrow_mut();
     let a = &mut *g;
 
-    let mut matches = Vec::new();
-    for (km, cmd) in &a.key_bindings {
-        if km.matches(&k) {
-            matches.push(*cmd);
-        }
-    }
-    assert!(matches.len() < 2);
-    if let Some(&cmd) = matches.first() {
+    if let Some(cmd) = a.match_key_event(&k) {
         drop(g);
         send_message(app_state, WM_COMMAND, cmd as usize, 0);
         return;
@@ -526,7 +532,7 @@ fn create_app_menu() -> HMENU {
     append_menu_string(file_menu, Idm::Save as u16, "&Save\tCtrl-S");
     append_menu_string(file_menu, Idm::SaveAs as u16, "&Save As...\tCtrl-Shift-S");
     append_menu_separator(file_menu);
-    append_menu_string(file_menu, Idm::Exit as u16, "&Exit\tAlt-F4");
+    append_menu_string(file_menu, Idm::Exit as u16, "&Exit\tAlt-Q");
     let edit_menu = create_menu();
     append_menu_string(edit_menu, Idm::Undo as u16, "&Undo\tCtrl-Z");
     append_menu_string(edit_menu, Idm::Redo as u16, "&Redo\tCtrl-Y");
@@ -543,9 +549,9 @@ fn create_app_menu() -> HMENU {
     append_menu_string(view_menu, Idm::SmallerFont as u16, "&Smaller font\tCtrl-- or Ctrl-Wheel Up");
     append_menu_string(view_menu, Idm::LargerFont as u16, "&Larger font\tCtrl-+ or Ctrl-Wheel Down");
     let menu = create_menu();
-    append_menu_popup(menu, file_menu, "&File");
-    append_menu_popup(menu, edit_menu, "&Edit");
-    append_menu_popup(menu, view_menu, "&View");
+    append_menu_popup(menu, file_menu, "File");
+    append_menu_popup(menu, edit_menu, "Edit");
+    append_menu_popup(menu, view_menu, "View");
     menu
 }
 
@@ -991,6 +997,30 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             println!("WM_KEYDOWN {:?}", ke);
             let app_state = &mut get_app_state(hWnd);
             handle_keydown(app_state, ke);
+            0
+        }
+        WM_SYSKEYDOWN => {
+            let ke = key_util::KeyEvent::new(wParam, lParam);
+            println!("WM_SYSKEYDOWN {:?}", ke);
+            let app_state = &mut get_app_state(hWnd);
+            let cmd = app_state.borrow_mut().match_key_event(&ke);
+
+            if let Some(cmd) = cmd {
+                send_message(app_state, WM_COMMAND, cmd as usize, 0);
+                0
+            } else {
+                unsafe { DefWindowProcW(hWnd, msg, wParam, lParam) }
+            }
+        }
+        WM_SYSCHAR => {
+            println!("WM_SYSCHAR");
+            // Default window proc for this event is utterly useless and even
+            // harmful.
+            // Alt-F supposed to open "File" menu?
+            // Yes, but only in English layout.
+            // In addition, unrecognized keys make annoying bell sound.
+            // So it's better to just sacrifice Alt-F functionality that's
+            // broken anyway.
             0
         }
         _ => unsafe { DefWindowProcW(hWnd, msg, wParam, lParam) }
