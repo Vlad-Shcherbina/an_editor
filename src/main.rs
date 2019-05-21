@@ -531,9 +531,12 @@ fn create_app_menu() -> HMENU {
     append_menu_string(edit_menu, Idm::Undo as u16, "&Undo\tCtrl-Z");
     append_menu_string(edit_menu, Idm::Redo as u16, "&Redo\tCtrl-Y");
     append_menu_separator(edit_menu);
+
+    // anchor:nlfrlxqmswoujkiu
     append_menu_string(edit_menu, Idm::Cut as u16, "&Cut\tCtrl-X or Shift-Del");
     append_menu_string(edit_menu, Idm::Copy as u16, "&Copy\tCtrl-C or Ctrl-Ins");
     append_menu_string(edit_menu, Idm::Paste as u16, "&Paste\tCtrl-V or Shift-Ins");
+
     append_menu_separator(edit_menu);
     append_menu_string(edit_menu, Idm::SelectAll as u16, "&Select all\tCtrl-A");
     let view_menu = create_menu();
@@ -839,6 +842,50 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 let app_state = &mut get_app_state(hWnd);
                 let id = LOWORD(wParam as u32);
                 handle_menu_command(app_state, id);
+            }
+            0
+        }
+        WM_CONTEXTMENU => {
+            println!("WM_CONTEXTMENU");
+            let rc = unsafe {
+                let mut rc: RECT = mem::uninitialized();
+                let res = GetClientRect(hWnd, &mut rc);
+                assert!(res != 0, "{}", Error::last_os_error());
+                rc
+            };
+            let pt_screen = POINT {
+                x: GET_X_LPARAM(lParam),
+                y: GET_Y_LPARAM(lParam),
+            };
+            dbg!((pt_screen.x, pt_screen.y));
+            let mut pt_client = pt_screen;
+            let res = unsafe { ScreenToClient(hWnd, &mut pt_client) };
+            assert!(res != 0);
+            if unsafe { PtInRect(&rc, pt_client)} != 0 ||
+               pt_screen.x == -1 && pt_screen.y == -1 {
+                let has_selection = get_app_state(hWnd).borrow_mut().view_state.has_selection();
+                let context_menu = create_menu();
+                // anchor:nlfrlxqmswoujkiu
+                if has_selection {
+                    append_menu_string(context_menu, Idm::Cut as u16, "&Cut\tCtrl-X or Shift-Del");
+                    append_menu_string(context_menu, Idm::Copy as u16, "&Copy\tCtrl-C or Ctrl-Ins");
+                }
+                append_menu_string(context_menu, Idm::Paste as u16, "&Paste\tCtrl-V or Shift-Ins");
+
+                // Popup menu has to be a submeny of some other menu,
+                // otherwise its size is not calculated correctly :(
+                let menu = create_menu();
+                append_menu_popup(menu, context_menu, "zzz");
+                let res = unsafe {
+                    TrackPopupMenuEx(
+                        context_menu,
+                        TPM_RIGHTBUTTON,
+                        pt_screen.x, pt_screen.y,
+                        hWnd,
+                        null_mut())
+                };
+                assert!(res != 0, "{}", Error::last_os_error());
+                destroy_menu(menu);
             }
             0
         }

@@ -272,6 +272,11 @@ pub fn create_menu() -> HMENU {
     menu
 }
 
+pub fn destroy_menu(menu: HMENU) {
+    let res = unsafe { DestroyMenu(menu) };
+    assert!(res != 0, "{}", Error::last_os_error());
+}
+
 pub fn append_menu_string(menu: HMENU, id: u16, text: &str) {
     let res = unsafe {
         AppendMenuW(menu, MF_STRING, id as usize, win32_string(text).as_ptr())
