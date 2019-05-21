@@ -19,5 +19,10 @@ features = [
     "commdlg",
 ]
 
+[profile.dev]
+panic = "abort"
+
 [profile.release]
 debug = true
+panic = "abort"
+lto = true

@@ -71,7 +71,7 @@ impl AppState {
     fn new(hwnd: HWND) -> Self {
         let d2d_factory = unsafe {
             let factory_options = D2D1_FACTORY_OPTIONS {
-                debugLevel: D2D1_DEBUG_LEVEL_INFORMATION,
+                debugLevel: D2D1_DEBUG_LEVEL_NONE,
             };
             let mut d2d_factory = null_mut();
             let hr = D2D1CreateFactory(
