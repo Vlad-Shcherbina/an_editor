@@ -744,6 +744,7 @@ fn handle_menu_command(app_state: &mut Token<AppState>, id: u16) {
     }
 }
 
+#[allow(clippy::cognitive_complexity)]
 // https://docs.microsoft.com/en-us/windows/desktop/winmsg/window-procedures
 extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
