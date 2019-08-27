@@ -376,9 +376,9 @@ impl ViewState {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
-        let layout = line.data.as_ref().unwrap();
+        let h = line.data.as_ref().unwrap().line_height;
         // TODO: what if line above has different height?
-        self.cursor_pos = self.coord_to_pos(self.anchor_x, y - layout.line_height * 0.5);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, y - h * 0.5);
         self.ensure_cursor_on_screen();
     }
 
@@ -388,9 +388,9 @@ impl ViewState {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
-        let layout = line.data.as_ref().unwrap();
+        let h = line.data.as_ref().unwrap().line_height;
         // TODO: what if line below has different height?
-        self.cursor_pos = self.coord_to_pos(self.anchor_x, y + layout.line_height * 1.5);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, y + h * 1.5);
         self.ensure_cursor_on_screen();
     }
 
@@ -410,10 +410,9 @@ impl ViewState {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
-        let layout = line.data.as_ref().unwrap();
+        let h = line.data.as_ref().unwrap().line_height;
         // TODO: what if lines has different heights?
-        self.cursor_pos = self.coord_to_pos(
-            self.anchor_x, y + layout.line_height * 1.5 - self.height);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, y + h * 1.5 - self.height);
         self.ensure_cursor_on_screen();
     }
 
@@ -423,10 +422,9 @@ impl ViewState {
         let line_no = self.document.find_line(self.cursor_pos);
         self.ensure_layout(line_no);
         let line = self.document.get_line(line_no);
-        let layout = line.data.as_ref().unwrap();
+        let h = line.data.as_ref().unwrap().line_height;
         // TODO: what if lines has different heights?
-        self.cursor_pos = self.coord_to_pos(
-            self.anchor_x, y - layout.line_height * 0.5 + self.height);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, y - h * 0.5 + self.height);
         self.ensure_cursor_on_screen();
     }
 
