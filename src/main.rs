@@ -178,7 +178,7 @@ impl Resources {
                 usage: D2D1_RENDER_TARGET_USAGE_NONE,
                 minLevel: D2D1_FEATURE_LEVEL_DEFAULT,
             };
-            let mut rc: RECT = mem::uninitialized();
+            let mut rc: RECT = mem::zeroed();
             let res = GetClientRect(hwnd, &mut rc);
             assert!(res != 0, "{}", Error::last_os_error());
             let hwnd_render_properties = D2D1_HWND_RENDER_TARGET_PROPERTIES {
@@ -854,7 +854,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         WM_CONTEXTMENU => {
             println!("WM_CONTEXTMENU");
             let rc = unsafe {
-                let mut rc: RECT = mem::uninitialized();
+                let mut rc: RECT = mem::zeroed();
                 let res = GetClientRect(hWnd, &mut rc);
                 assert!(res != 0, "{}", Error::last_os_error());
                 rc
@@ -1091,7 +1091,7 @@ fn main() -> Result<(), Error> {
     }
     loop {
         unsafe {
-            let mut message: MSG = mem::uninitialized();
+            let mut message: MSG = mem::zeroed();
             let res = GetMessageW(&mut message, null_mut(), 0, 0);
             if res < 0 {
                 Err(Error::last_os_error())?
