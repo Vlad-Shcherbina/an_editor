@@ -47,12 +47,12 @@ pub fn create_window(class_name: &str, title: &str, wnd_proc: WNDPROC) -> Result
     unsafe {
         let hInstance = GetModuleHandleW(null_mut());
         if hInstance.is_null() {
-            Err(Error::last_os_error())?
+            return Err(Error::last_os_error());
         }
 
         let cursor = LoadCursorW(0 as HINSTANCE, IDC_IBEAM);
         if cursor.is_null() {
-            Err(Error::last_os_error())?
+            return Err(Error::last_os_error());
         }
 
         let wnd_class = WNDCLASSW {
@@ -70,7 +70,7 @@ pub fn create_window(class_name: &str, title: &str, wnd_proc: WNDPROC) -> Result
 
         let class_atom = RegisterClassW(&wnd_class);
         if class_atom == 0 {
-            Err(Error::last_os_error())?
+            return Err(Error::last_os_error());
         }
 
         let handle = CreateWindowExW(

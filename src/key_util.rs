@@ -106,6 +106,7 @@ impl std::ops::Add<KeyMatcher> for Modifier {
         assert!(!(self.ctrl && km.ctrl));
         assert!(!(self.shift && km.shift));
         assert!(!(self.alt && km.alt));
+        #[allow(clippy::suspicious_arithmetic_impl)]
         KeyMatcher {
             ctrl: self.ctrl || km.ctrl,
             shift: self.shift || km.shift,

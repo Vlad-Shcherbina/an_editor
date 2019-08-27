@@ -1094,7 +1094,7 @@ fn main() -> Result<(), Error> {
             let mut message: MSG = mem::zeroed();
             let res = GetMessageW(&mut message, null_mut(), 0, 0);
             if res < 0 {
-                Err(Error::last_os_error())?
+                return Err(Error::last_os_error());
             }
             if res == 0 {  // WM_QUIT
                 break
