@@ -6,6 +6,8 @@ edition = "2018"
 
 [dependencies]
 backtrace = "*"
+log = "*"
+env_logger = { version = "*", default-features = false, features = ["termcolor", "atty", "humantime"]}
 
 [dependencies.winapi]
 version = "*"

@@ -21,6 +21,8 @@ use winapi::um::d2d1::{
     D2D1_POINT_2F,
 };
 
+use log::info;
+
 mod com_ptr;
 mod text_layout;
 mod line_gap_buffer;
@@ -747,7 +749,7 @@ extern "system"
 fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRESULT {
     match msg {
         WM_CREATE => {
-            println!("WM_CREATE");
+            info!("WM_CREATE");
 
             let app_state = AppState::new(hWnd);
 
@@ -770,7 +772,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_NCDESTROY => {
-            println!("WM_NCDESTROY");
+            info!("WM_NCDESTROY");
 
             // just to ensure nobody is borrowing it at the moment
             get_app_state(hWnd).borrow_mut();
@@ -786,7 +788,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_CLOSE => {
-            println!("WM_CLOSE");
+            info!("WM_CLOSE");
             let app_state = &mut get_app_state(hWnd);
             let modified = app_state.borrow_mut().view_state.modified();
             if !modified ||
@@ -796,7 +798,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_PAINT => {
-            println!("WM_PAINT");
+            info!("WM_PAINT");
             let app_state = &mut get_app_state(hWnd);
             let flash = {
                 let mut app_state = app_state.borrow_mut();
@@ -806,14 +808,14 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 app_state.flash.take()
             };
             if let Some(s) = flash {
-                println!("flash");
+                info!("flash");
                 message_box(app_state, "an editor", &s, MB_OK | MB_ICONINFORMATION);
             }
 
             0
         }
         WM_SIZE => {
-            println!("WM_SIZE");
+            info!("WM_SIZE");
             let app_state = &mut get_app_state(hWnd);
             let mut g = app_state.borrow_mut();
             let a = &mut *g;
@@ -826,7 +828,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             };
 
             if render_size.width == 0 && render_size.height == 0 {
-                println!("minimize");
+                info!("minimize");
             } else {
                 let hr = unsafe { resources.render_target.Resize(&render_size) };
                 assert!(hr == S_OK, "0x{:x}", hr);
@@ -837,13 +839,13 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_ENTERMENULOOP => {
-            println!("WM_ENTERMENULOOP");
+            info!("WM_ENTERMENULOOP");
             let app_state = &mut get_app_state(hWnd);
             enable_available_menu_items(&mut app_state.borrow_mut());
             0
         }
         WM_COMMAND => {
-            println!("WM_COMMAND");
+            info!("WM_COMMAND");
             if HIWORD(wParam as u32) == 0 {
                 let app_state = &mut get_app_state(hWnd);
                 let id = LOWORD(wParam as u32);
@@ -852,7 +854,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_CONTEXTMENU => {
-            println!("WM_CONTEXTMENU");
+            info!("WM_CONTEXTMENU");
             let rc = unsafe {
                 let mut rc: RECT = mem::zeroed();
                 let res = GetClientRect(hWnd, &mut rc);
@@ -863,7 +865,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 x: GET_X_LPARAM(lParam),
                 y: GET_Y_LPARAM(lParam),
             };
-            dbg!((pt_screen.x, pt_screen.y));
+            info!("x={}, y={}", pt_screen.x, pt_screen.y);
             let mut pt_client = pt_screen;
             let res = unsafe { ScreenToClient(hWnd, &mut pt_client) };
             assert!(res != 0);
@@ -896,7 +898,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_LBUTTONDOWN => {
-            println!("WM_LBUTTONDOWN");
+            info!("WM_LBUTTONDOWN");
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
 
@@ -914,7 +916,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_LBUTTONUP => {
-            println!("WM_LBUTTONUP");
+            info!("WM_LBUTTONUP");
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
             app_state.left_button_pressed = false;
@@ -923,7 +925,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_LBUTTONDBLCLK => {
-            println!("WM_LBUTTONDBLCLK");
+            info!("WM_LBUTTONDBLCLK");
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
             let x = GET_X_LPARAM(lParam);
@@ -933,7 +935,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             0
         }
         WM_MOUSEMOVE => {
-            // println!("WM_MOUSEMOVE");
+            // info!("WM_MOUSEMOVE");
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
             if app_state.left_button_pressed {
@@ -946,7 +948,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_MOUSEWHEEL => {
             let delta = GET_WHEEL_DELTA_WPARAM(wParam);
-            println!("WM_MOUSEWHEEL {}", delta);
+            info!("WM_MOUSEWHEEL {}", delta);
 
             let app_state = &mut get_app_state(hWnd);
             let mut app_state = app_state.borrow_mut();
@@ -978,7 +980,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_CHAR => {
             let c: char = std::char::from_u32(wParam as u32).unwrap();
-            println!("WM_CHAR {:?}", c);
+            info!("WM_CHAR {:?}", c);
             if wParam >= 32 || wParam == 9 /* tab */ {
                 let app_state = &mut get_app_state(hWnd);
                 let mut app_state = app_state.borrow_mut();
@@ -994,14 +996,14 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
         }
         WM_KEYDOWN => {
             let ke = key_util::KeyEvent::new(wParam, lParam);
-            println!("WM_KEYDOWN {:?}", ke);
+            info!("WM_KEYDOWN {:?}", ke);
             let app_state = &mut get_app_state(hWnd);
             handle_keydown(app_state, ke);
             0
         }
         WM_SYSKEYDOWN => {
             let ke = key_util::KeyEvent::new(wParam, lParam);
-            println!("WM_SYSKEYDOWN {:?}", ke);
+            info!("WM_SYSKEYDOWN {:?}", ke);
             let app_state = &mut get_app_state(hWnd);
             let cmd = app_state.borrow_mut().match_key_event(&ke);
 
@@ -1013,7 +1015,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
             }
         }
         WM_SYSCHAR => {
-            println!("WM_SYSCHAR");
+            info!("WM_SYSCHAR");
             // Default window proc for this event is utterly useless and even
             // harmful.
             // Alt-F supposed to open "File" menu?
@@ -1048,7 +1050,7 @@ fn panic_hook(pi: &std::panic::PanicInfo) {
 
     let bt = backtrace::Backtrace::new();
     let message = format!("panic {:?}, {}\n{:?}", payload, loc, bt);
-    println!("{}", message);
+    log::error!("{}", message);
     std::fs::write("error.txt", message).unwrap();
 
     let hwnd = unsafe { STATIC_HWND };
@@ -1084,6 +1086,8 @@ fn panic_hook(pi: &std::panic::PanicInfo) {
 static mut STATIC_HWND: Option<HWND> = None;
 
 fn main() -> Result<(), Error> {
+    env_logger::init();
+
     std::panic::set_hook(Box::new(panic_hook));
     let hwnd = create_window("an_editor", "window title", Some(my_window_proc))?;
     unsafe {
