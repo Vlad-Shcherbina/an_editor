@@ -390,7 +390,7 @@ impl ViewState {
         let line = self.document.get_line(line_no);
         let h = line.data.as_ref().unwrap().line_height;
         // TODO: what if line below has different height?
-        self.cursor_pos = self.coord_to_pos(self.anchor_x, y + h * 1.5);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, h.mul_add(1.5, y));
         self.ensure_cursor_on_screen();
     }
 
@@ -412,7 +412,7 @@ impl ViewState {
         let line = self.document.get_line(line_no);
         let h = line.data.as_ref().unwrap().line_height;
         // TODO: what if lines has different heights?
-        self.cursor_pos = self.coord_to_pos(self.anchor_x, y + h * 1.5 - self.height);
+        self.cursor_pos = self.coord_to_pos(self.anchor_x, h.mul_add(1.5, y - self.height));
         self.ensure_cursor_on_screen();
     }
 

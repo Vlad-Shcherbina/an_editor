@@ -962,7 +962,7 @@ fn my_window_proc(hWnd: HWND, msg: UINT, wParam: WPARAM, lParam: LPARAM) -> LRES
                 app_state.font_size = app_state.font_size.min(MAX_FONT_SIZE);
                 let tf = create_text_format(&app_state.dwrite_factory, app_state.font_size);
                 app_state.resources.text_format = tf.clone();
-                app_state.view_state.change_text_format(tf.clone());
+                app_state.view_state.change_text_format(tf);
                 invalidate_rect(app_state.hwnd);
             } else {
                 let mut scroll_lines: UINT = 0;
